@@ -1,0 +1,8 @@
+build:
+  gpu: false
+  python_version: "3.11"  # support only 3.11
+  system_packages:
+  python_packages:
+    - torch==2.2.0
+    - torchvision==0.17.0
+    - onnxruntime
