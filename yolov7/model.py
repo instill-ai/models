@@ -314,12 +314,6 @@ class Yolov7:
             outputs[0], orig_img_hw, scaled_img_hw
         )
 
-        import pprint
-
-        pprint.pprint(bboxes)
-        pprint.pprint(scores)
-        pprint.pprint(labels)
-
         return construct_task_detection_output(
             bounding_boxes=bboxes,
             scores=scores,
