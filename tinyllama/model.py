@@ -19,7 +19,7 @@ class TinyLlama:
             device_map="cpu",
         )
 
-    async def Trigger(self, request):
+    async def __call__(self, request):
         conversation_inputs = parse_task_text_generation_chat_to_conversation_input(
             request=request
         )

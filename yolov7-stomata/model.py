@@ -86,7 +86,7 @@ class StomataYolov7:
 
         return rles, ret_boxes, ret_labels, ret_scores
 
-    async def Trigger(self, request):
+    async def __call__(self, request):
         vision_inputs = parse_task_instance_segmentation_to_vision_input(
             request=request
         )
