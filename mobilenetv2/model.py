@@ -39,7 +39,7 @@ class MobileNet:
         return categories
 
     async def __call__(self, request):
-        vision_inputs = parse_task_classification_to_vision_input(request=request)
+        vision_inputs = await parse_task_classification_to_vision_input(request=request)
 
         batch_out = []
         for inp in vision_inputs:
@@ -54,11 +54,11 @@ class MobileNet:
         # tensor([[207], [294]]), tensor([[0.7107], [0.7309]])
         score, cat = torch.topk(torch.from_numpy(out[0]), 1)
 
-        scores = [score[i][0] for i in range(cat.size(0))]
+        scores = [score[i][0].numpy() for i in range(cat.size(0))]
         categories = [self.categories[cat[i]] for i in range(cat.size(0))]
 
         return construct_task_classification_output(
-            categories=categories, scores=scores
+            request=request, categories=categories, scores=scores
         )
 
 
