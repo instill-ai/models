@@ -1,8 +1,6 @@
 # pylint: skip-file
 import os
 
-# TORCH_GPU_MEMORY_FRACTION = 0.95  # Target memory ~= 15G on 16G card
-# TORCH_GPU_MEMORY_FRACTION = 0.38  # Target memory ~= 15G on 40G card
 TORCH_GPU_DEVICE_ID = 0
 os.environ["CUDA_VISIBLE_DEVICES"] = f"{TORCH_GPU_DEVICE_ID}"
 
@@ -11,7 +9,6 @@ import torch
 import transformers
 from transformers import LlamaTokenizer
 
-from conversation import Conversation, conv_templates, SeparatorStyle
 from instill.helpers.ray_config import instill_deployment, InstillDeployable
 from instill.helpers import (
     parse_task_chat_to_chat_input,
@@ -22,16 +19,13 @@ from instill.helpers import (
 @instill_deployment
 class Llama2Chat:
     def __init__(self):
-        self.tokenizer = LlamaTokenizer.from_pretrained("Llama-2-7b-chat-hf")
         self.pipeline = transformers.pipeline(
             "text-generation",
             model="Llama-2-7b-chat-hf",
             torch_dtype=torch.float16,
             device_map="auto",
-            # prefer_safe=True,
         )
 
-    # async def ModelInfer(self, request: ModelInferRequest) -> ModelInferResponse:
     async def __call__(self, request):
         conversation_inputs = await parse_task_chat_to_chat_input(request=request)
 
