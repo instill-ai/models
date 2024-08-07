@@ -303,7 +303,7 @@ class Yolov7:
         return bboxes, scores, labels
 
     async def __call__(self, request):
-        vision_inputs = parse_task_detection_to_vision_input(request=request)
+        vision_inputs = await parse_task_detection_to_vision_input(request=request)
 
         images, orig_img_hw, scaled_img_hw = self._pre_procoess(vision_inputs)
 
@@ -315,6 +315,7 @@ class Yolov7:
         )
 
         return construct_task_detection_output(
+            request=request,
             bounding_boxes=bboxes,
             scores=scores,
             categories=labels,
