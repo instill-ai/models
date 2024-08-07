@@ -1,11 +1,11 @@
+import time
 import torch
-
 from transformers import pipeline
 
 from instill.helpers.ray_config import instill_deployment, InstillDeployable
 from instill.helpers import (
-    parse_task_text_generation_chat_to_conversation_input,
-    construct_task_text_generation_chat_output,
+    parse_task_chat_to_chat_input,
+    construct_task_chat_output,
 )
 
 
@@ -20,14 +20,16 @@ class TinyLlama:
         )
 
     async def __call__(self, request):
-        conversation_inputs = parse_task_text_generation_chat_to_conversation_input(
-            request=request
-        )
+        conversation_inputs = await parse_task_chat_to_chat_input(request=request)
 
-        outputs = []
-        for inp in conversation_inputs:
+        finish_reasons = []
+        indexes = []
+        created = []
+        messages = []
+        for i, inp in enumerate(conversation_inputs):
+            print(inp.messages)
             prompt = self.pipeline.tokenizer.apply_chat_template(
-                inp.conversation,
+                inp.messages,
                 tokenize=False,
                 add_generation_prompt=True,
             )
@@ -35,11 +37,10 @@ class TinyLlama:
             # inference
             sequences = self.pipeline(
                 prompt,
-                max_new_tokens=inp.max_new_tokens,
+                max_new_tokens=inp.max_tokens,
                 do_sample=True,
                 temperature=inp.temperature,
-                top_k=inp.top_k,
-                top_p=0.95,
+                top_p=inp.top_p,
             )
 
             output = (
@@ -49,9 +50,18 @@ class TinyLlama:
                 .encode("utf-8")
             )
 
-            outputs.append(output)
+            messages.append([{"content": str(output), "role": "assistant"}])
+            finish_reasons.append(["length"])
+            indexes.append([i])
+            created.append([int(time.time())])
 
-        return construct_task_text_generation_chat_output(outputs)
+        return construct_task_chat_output(
+            request=request,
+            finish_reasons=finish_reasons,
+            indexes=indexes,
+            messages=messages,
+            created_timestamps=created,
+        )
 
 
 entrypoint = InstillDeployable(TinyLlama).get_deployment_handle()
