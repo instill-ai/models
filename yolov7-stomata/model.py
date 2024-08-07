@@ -87,7 +87,7 @@ class StomataYolov7:
         return rles, ret_boxes, ret_labels, ret_scores
 
     async def __call__(self, request):
-        vision_inputs = parse_task_instance_segmentation_to_vision_input(
+        vision_inputs = await parse_task_instance_segmentation_to_vision_input(
             request=request
         )
 
@@ -158,7 +158,7 @@ class StomataYolov7:
             rs_rles.append(o_rles)
 
         return construct_task_instance_segmentation_output(
-            rs_rles, rs_labels, rs_scores, rs_boxes
+            request, rs_rles, rs_labels, rs_scores, rs_boxes
         )
 
 
