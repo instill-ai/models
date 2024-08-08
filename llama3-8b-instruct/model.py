@@ -71,6 +71,7 @@ class Llama3Instruct:
 
         return construct_task_chat_output(
             request=request,
+            finish_reasons=finish_reasons,
             indexes=indexes,
             created_timestamps=created,
             messages=messages,
