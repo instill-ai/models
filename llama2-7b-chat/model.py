@@ -56,12 +56,8 @@ class Llama2Chat:
         indexes = [[]]
         created = [[]]
         for i, seq in enumerate(sequences):
-            generated_text = (
-                seq["generated_text"].split("[/INST]")[-1].strip().encode("utf-8")
-            )
-            text_outputs[0].append(
-                {"content": str(generated_text), "role": "assistant"}
-            )
+            generated_text = seq["generated_text"].split("[/INST]")[-1].strip()
+            text_outputs[0].append({"content": generated_text, "role": "assistant"})
             finish_reasons[0].append("length")
             indexes[0].append(i)
             created[0].append(int(time.time()))

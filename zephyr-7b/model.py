@@ -11,13 +11,13 @@ from instill.helpers import (
 
 
 @instill_deployment
-class Llama3Instruct:
+class Zephyr:
     def __init__(self):
         self.pipeline = transformers.pipeline(
             "text-generation",
-            model="Meta-Llama-3-8B-Instruct",
-            model_kwargs={"torch_dtype": torch.bfloat16},
-            device="cuda",
+            model="zephyr-7b-alpha",
+            torch_dtype=torch.float16,
+            device_map="cuda",
         )
 
     async def __call__(self, request):
@@ -56,7 +56,7 @@ class Llama3Instruct:
             for i, seq in enumerate(sequences):
                 generated_text = (
                     seq["generated_text"]
-                    .split("<|start_header_id|>assistant<|end_header_id|>")[-1]
+                    .split("<|assistant|>")[-1]
                     .strip()
                 )
                 messages_per_seq.append(
@@ -80,4 +80,4 @@ class Llama3Instruct:
         )
 
 
-entrypoint = InstillDeployable(Llama3Instruct).get_deployment_handle()
+entrypoint = InstillDeployable(Zephyr).get_deployment_handle()

@@ -53,7 +53,7 @@ class CodeLlama:
             created_per_seq = []
             contents_per_seq = []
             for i, seq in enumerate(sequences):
-                generated_text = seq["generated_text"].strip().encode("utf-8")
+                generated_text = seq["generated_text"].strip()
                 contents_per_seq.append(generated_text)
                 finish_reasons_per_seq.append("length")
                 indexes_per_seq.append(i)
