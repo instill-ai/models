@@ -1,9 +1,6 @@
 # pylint: skip-file
 import os
 
-# os.environ["CUDA_VISIBLE_DEVICES"] = f"0,1,2,3"
-os.environ["CUDA_VISIBLE_DEVICES"] = f"0"
-
 import time
 import torch
 import transformers
@@ -40,14 +37,9 @@ class CodeLlama:
         created = []
         contents = []
         for inp in completion_inputs:
-            conv = self.pipeline.tokenizer.apply_chat_template(
-                inp.prompt,
-                tokenize=False,
-                add_generation_prompt=True,
-            )
 
             sequences = self.pipeline(
-                conv,
+                inp.prompt,
                 do_sample=True,
                 temperature=inp.temperature,
                 top_p=inp.top_p,
