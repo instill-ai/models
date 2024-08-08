@@ -1,4 +1,5 @@
 # pylint: skip-file
+import base64
 import random
 import numpy as np
 import torch
@@ -17,7 +18,6 @@ class SdXL:
         self.base = DiffusionPipeline.from_pretrained(
             "stable-diffusion-xl-base-1.0", torch_dtype=torch.float16, variant="fp16", use_safetensors=True
         ).to("cuda")
-        self.base.unet = torch.compile(self.base.unet, mode="reduce-overhead", fullgraph=True)
         self.refiner = DiffusionPipeline.from_pretrained(
             "stable-diffusion-xl-refiner-1.0",
             text_encoder_2=self.base.text_encoder_2,
@@ -26,7 +26,6 @@ class SdXL:
             variant="fp16",
             use_safetensors=True,
         ).to("cuda")
-        self.refiner.unet = torch.compile(self.base.unet, mode="reduce-overhead", fullgraph=True)
 
 
     async def __call__(self, request):
@@ -41,7 +40,7 @@ class SdXL:
             random.seed(inp.seed)
             np.random.seed(inp.seed)
 
-            images = self.base(
+            base_images = self.base(
                 prompt=inp.prompt,
                 num_inference_steps=n_steps,
                 denoising_end=high_noise_frac,
@@ -49,16 +48,17 @@ class SdXL:
             ).images
 
             generated_images = self.refiner(
-                prompt=prompt,
+                prompt=inp.prompt,
                 num_inference_steps=n_steps,
                 denoising_end=high_noise_frac,
-                image=images,
+                image=base_images,
             ).images
 
             imgs = []
             finishes = []
             for img in generated_images:
-                imgs.append(img)
+                image_bytes = img.tobytes()
+                imgs.append(base64.b64encode(image_bytes).decode())
                 finishes.append("success")
 
             images.append(imgs)
