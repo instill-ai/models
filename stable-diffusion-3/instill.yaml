@@ -2,6 +2,6 @@ build:
   gpu: true
   python_version: "3.11" # support only 3.11
   python_packages:
-    - torch==2.2.0
-    - transformers==4.36.2
-    - diffusers==0.24.0
+    - torch==2.4.0
+    - transformers==4.44.0
+    - diffusers==0.30.0
