@@ -58,10 +58,9 @@ class Llama3Instruct:
                     seq["generated_text"]
                     .split("<|start_header_id|>assistant<|end_header_id|>")[-1]
                     .strip()
-                    .encode("utf-8")
                 )
                 messages_per_seq.append(
-                    {"content": str(generated_text), "role": "assistant"}
+                    {"content": generated_text, "role": "assistant"}
                 )
                 finish_reasons_per_seq.append("length")
                 indexes_per_seq.append(i)

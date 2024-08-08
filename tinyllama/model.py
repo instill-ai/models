@@ -47,10 +47,9 @@ class TinyLlama:
                 sequences[0]["generated_text"]
                 .split("<|assistant|>\n")[-1]
                 .strip()
-                .encode("utf-8")
             )
 
-            messages.append([{"content": str(output), "role": "assistant"}])
+            messages.append([{"content": output, "role": "assistant"}])
             finish_reasons.append(["length"])
             indexes.append([i])
             created.append([int(time.time())])

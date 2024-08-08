@@ -54,9 +54,13 @@ class Zephyr:
             created_per_seq = []
             messages_per_seq = []
             for i, seq in enumerate(sequences):
-                generated_text = seq["generated_text"].strip().encode("utf-8")
+                generated_text = (
+                    seq["generated_text"]
+                    .split("<|assistant|>")[-1]
+                    .strip()
+                )
                 messages_per_seq.append(
-                    {"content": str(generated_text), "role": "assistant"}
+                    {"content": generated_text, "role": "assistant"}
                 )
                 finish_reasons_per_seq.append("length")
                 indexes_per_seq.append(i)
