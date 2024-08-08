@@ -57,7 +57,7 @@ class Llama3Instruct:
             messages_per_seq = []
             for i, seq in enumerate(sequences):
                 generated_text = (
-                    seq["generated_text"].split("[/INST]")[-1].strip().encode("utf-8")
+                    seq["generated_text"].split("<|start_header_id|>assistant<|end_header_id|>")[-1].strip().encode("utf-8")
                 )
                 messages_per_seq.append(generated_text)
                 finish_reasons_per_seq.append("length")
