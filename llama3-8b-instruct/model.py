@@ -60,7 +60,9 @@ class Llama3Instruct:
                     .strip()
                     .encode("utf-8")
                 )
-                messages_per_seq.append(generated_text)
+                messages_per_seq.append(
+                    {"content": str(generated_text), "role": "assistant"}
+                )
                 finish_reasons_per_seq.append("length")
                 indexes_per_seq.append(i)
                 created_per_seq.append(int(time.time()))

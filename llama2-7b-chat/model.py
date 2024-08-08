@@ -51,17 +51,17 @@ class Llama2Chat:
             max_length=conversation_inputs[0].max_tokens,
         )
 
-        text_outputs = []
-        for seq in sequences:
-            generated_text = (
-                seq["generated_text"].split("[/INST]")[-1].strip().encode("utf-8")
-            )
-            text_outputs.append(generated_text)
-
+        text_outputs = [[]]
         finish_reasons = [[]]
         indexes = [[]]
         created = [[]]
-        for i in range(len(text_outputs)):
+        for i, seq in enumerate(sequences):
+            generated_text = (
+                seq["generated_text"].split("[/INST]")[-1].strip().encode("utf-8")
+            )
+            text_outputs[0].append(
+                {"content": str(generated_text), "role": "assistant"}
+            )
             finish_reasons[0].append("length")
             indexes[0].append(i)
             created[0].append(int(time.time()))
@@ -71,7 +71,7 @@ class Llama2Chat:
             finish_reasons=finish_reasons,
             indexes=indexes,
             created_timestamps=created,
-            messages=[text_outputs],
+            messages=text_outputs,
         )
 
 
