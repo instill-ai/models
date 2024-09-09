@@ -10,7 +10,7 @@ from instill.helpers import (
 
 
 @instill_deployment
-class Stella:
+class Qwen:
     def __init__(self):
         self.model = SentenceTransformer(
             "gte-Qwen2-1.5B-instruct",
@@ -55,4 +55,4 @@ class Stella:
         )
 
 
-entrypoint = InstillDeployable(Stella).get_deployment_handle()
+entrypoint = InstillDeployable(Qwen).get_deployment_handle()
