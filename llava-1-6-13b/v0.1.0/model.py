@@ -63,9 +63,11 @@ class Llava:
 
             prompt = conv.get_prompt()
 
-            image_tensors = process_images(
-                images, self.image_processor, {"image_aspect_ratio": "pad"}
-            ).to(self.model.device, dtype=torch.float16)
+            image_tensors = []
+            if len(images) > 0:
+                image_tensors = process_images(
+                    images, self.image_processor, {"image_aspect_ratio": "pad"}
+                ).to(self.model.device, dtype=torch.float16)
 
             input_ids = (
                 tokenizer_image_token(
