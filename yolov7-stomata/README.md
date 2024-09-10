@@ -41,7 +41,7 @@ curl -o model.pt https://artifacts.instill.tech/model/yolov7-stomata/model.pt
 
 ## Test model image
 
-After you've built the model image and before pushing the model onto any Instill-Core instance, you can test if the model can be successfully run locally first, by running the following command:
+After you've built the model image, and before pushing the model onto any **Instill Core** instance, you can test if the model can be successfully run locally first, by running the following command:
 
 ```bash
 instill run admin/yolov7-stomata -i '{"image-url": "https://microscopyofnature.com/sites/default/files/2022-03/Mais-stomata-ZW10.jpg", "type": "image-url"}'
