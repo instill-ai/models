@@ -30,7 +30,7 @@ We leverage Instill Core to provide a seamless experience for serving models. Fo
 
 #### Self-host Instill-Core
 
-- Follow this [quickstart guide](https://www.instill.tech/docs/quickstart) to get it up and running.
+Follow [this section](https://www.instill.tech/docs/quickstart#-instill-core) of our quick start guide to get it up and running with self-hosting **Instill Core** on a local or remote instance.
 
 #### Instill Cloud
 
