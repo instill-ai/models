@@ -1,6 +1,6 @@
 # Instill AI Models
 
-Welcome to our Model Repository! This repository houses a collection of machine learning models designed to perform various AI tasks, and be seamlessly served on [Instill Core](https://github.com/instill-ai/instill-core) or [Instill Cloud](www.instill.tech).
+Welcome to our Model Repository! This repository houses a collection of machine learning models designed to perform various AI tasks. They are all prepared and ready to be seamlessly served on [**Instill Core**](https://www.instill.tech/docs/core/introduction) or [**Instill Cloud**](https://www.instill.tech/docs/cloud/introduction) via our MLOps/LLMOps platform [**Instill Model**](https://www.instill.tech/docs/model/introduction).
 
 ## Available Models
 
