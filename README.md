@@ -34,7 +34,7 @@ Follow [this section](https://www.instill.tech/docs/quickstart#-instill-core) of
 
 #### ☁️ Instill Cloud
 
-- Go to our [website](https://www.instill.tech/) and check out what we have to offer.
+Follow [this section](https://www.instill.tech/docs/quickstart#%EF%B8%8F-instill-cloud) of our quick start guide to get it up and running on **Instill Cloud**, our fully managed public cloud service that provides you with access to all the features of **Instill Core** without the burden of infrastructure management.
 
 ### 2. Create a Namespace
 
