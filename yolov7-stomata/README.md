@@ -10,7 +10,7 @@
 
 ## 🔄 Compatibility Matrix
 
-To ensure smooth integration, please refer to the compatibility matrix below. It outlines the compatible versions of the model, `instill-core`, and the `python-sdk`.
+To ensure smooth integration, please refer to the compatibility matrix below. It outlines the compatible versions of the model, [`instill-core`](https://github.com/instill-ai/instill-core), and the [`python-sdk`](https://github.com/instill-ai/python-sdk).
 
 | Model Version | Instill-Core Version | Python-SDK Version |
 | ------------- | -------------------- | ------------------ |
