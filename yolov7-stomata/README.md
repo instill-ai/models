@@ -23,7 +23,7 @@ To ensure smooth integration, please refer to the compatibility matrix below. It
 
 Follow [this](../README.md) guide to get your custom model up and running! But before you do that, please read through the following sections to have all the necessary files ready.
 
-### Install SDK
+#### Install Python SDK
 
 Install the compatible [`python-sdk`](https://github.com/instill-ai/python-sdk) version according to the compatibility matrix:
 
