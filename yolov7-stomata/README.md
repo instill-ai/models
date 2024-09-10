@@ -47,7 +47,7 @@ After you've built the model image, and before pushing the model onto any **Inst
 instill run admin/yolov7-stomata -i '{"image-url": "https://microscopyofnature.com/sites/default/files/2022-03/Mais-stomata-ZW10.jpg", "type": "image-url"}'
 ```
 
-And you should get a output like this
+A successful response will return a similar output to that shown below.
 
 ```bash
 2024-09-04 00:17:41,512.512 INFO     [Instill] Starting model image...
