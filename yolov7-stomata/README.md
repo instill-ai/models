@@ -25,7 +25,7 @@ Follow [this](../README.md) guide to get your custom model up and running! But b
 
 ### Install SDK
 
-- Install the compatible python-sdk version according to the compatibility matrix
+Install the compatible [`python-sdk`](https://github.com/instill-ai/python-sdk) version according to the compatibility matrix:
 
 ```bash
 pip install instill-sdk=={version}
