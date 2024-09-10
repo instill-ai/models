@@ -36,7 +36,7 @@ Follow [this section](https://www.instill.tech/docs/quickstart#-instill-core) of
 
 Follow [this section](https://www.instill.tech/docs/quickstart#%EF%B8%8F-instill-cloud) of our quick start guide to get it up and running on **Instill Cloud**, our fully managed public cloud service that provides you with access to all the features of **Instill Core** without the burden of infrastructure management.
 
-### 2. Create a Namespace
+### 2. Create a model namespace
 
 To create a namespace, follow the steps in [Create a Namespace Documentation](https://www.instill.tech/docs/model/create/namespace).
 
