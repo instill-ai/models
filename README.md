@@ -42,7 +42,7 @@ To create a model namespace, follow the steps on the [Create Namespace](https://
 
 ### 3. Prepare your model
 
-Find the model you want to serve and download the desired version folder, also check out the particular model folder README to obtain other necessary files and model weights or perform necessary steps.
+Find the model you want to serve and download the desired version folder. Also, make sure to check out the particular model folder README to obtain other necessary files, model weights or perform any additional required steps.
 
 ### 4. Build your model
 
