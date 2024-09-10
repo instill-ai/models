@@ -54,7 +54,7 @@ Follow the steps on the [Push Model Image](https://www.instill.tech/docs/model/c
 
 ## Implement your own custom model
 
-Follow the steps in [Prepare Model](https://www.instill.tech/docs/model/create/prepare) to see how to implement your own custom model that can be served on Instill Core and Instill Cloud!
+Follow the steps on the [Prepare Model](https://www.instill.tech/docs/model/create/prepare) page to see how to implement your own custom model that can be served on **Instill Core** and **Instill Cloud**! You can also checkout the [step-by-step tutorial](https://www.instill.tech/blog/model-serving-on-instill-core) which walks you through the process of serving your own custom model on **Instill Core**.
 
 ## 🤝 Contributing
 
