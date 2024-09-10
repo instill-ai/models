@@ -21,7 +21,7 @@ To ensure smooth integration, please refer to the compatibility matrix below. It
 
 ## 🚀 Preparation
 
-Follow [this](./README.md) guide to get your custom model up and running! But before you do that, please read through the following sections to have all the necessary files ready.
+Follow [this](../README.md) guide to get your custom model up and running! But before you do that, please read through the following sections to have all the necessary files ready.
 
 ### Install SDK
 
