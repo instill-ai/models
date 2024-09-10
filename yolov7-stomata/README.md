@@ -31,7 +31,7 @@ Install the compatible [`python-sdk`](https://github.com/instill-ai/python-sdk) 
 pip install instill-sdk=={version}
 ```
 
-### Get model weight
+#### Get model weights
 
 get the model weight by executing the following command.
 
