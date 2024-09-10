@@ -46,7 +46,7 @@ Find the model you want to serve and download the desired version folder. Also, 
 
 ### 4. Build your model
 
-Follow the steps in [Build Your Model Documentation](https://www.instill.tech/docs/model/create/build), and remember to install the python-sdk version according to the compatibility matrix in each model's README.
+Follow the steps on the [Build Model Image](https://www.instill.tech/docs/model/create/build) page, and remember to install the `python-sdk` version according to the compatibility matrix in each model's README.
 
 ### 5. Push and deploy your model
 
