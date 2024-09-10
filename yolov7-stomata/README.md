@@ -47,13 +47,22 @@ After you've built the model image, and before pushing the model onto any **Inst
 instill run admin/yolov7-stomata -i '{"image-url": "https://microscopyofnature.com/sites/default/files/2022-03/Mais-stomata-ZW10.jpg", "type": "image-url"}'
 ```
 
+The input payload should strictly follow the the below format
+
+```json
+{
+  "image-url": "https://...",
+  "type": "image-url"
+}
+```
+
 A successful response will return a similar output to that shown below.
 
 ```bash
 2024-09-04 00:17:41,512.512 INFO     [Instill] Starting model image...
 2024-09-04 00:17:51,820.820 INFO     [Instill] Deploying model...
 2024-09-04 00:17:53,510.510 INFO     [Instill] Running inference...
-2024-09-03 09:17:57,564.564 INFO     [Instill] Outputs:
+2024-09-04 00:17:57,564.564 INFO     [Instill] Outputs:
 [
     {
         "data": {
@@ -100,6 +109,12 @@ A successful response will return a similar output to that shown below.
 ]
 2024-09-04 00:18:00,141.141 INFO     [Instill] Done
 ```
+
+Here is the list of flags supported by `instill run` command
+
+- -t, --tag: tag for the model image, default to `latest`
+- -g, --gpu: to pass through GPU from host into container or not, depends on if `gpu` is enabled in the config.
+- -i, --input: input in json format
 
 ---
 
