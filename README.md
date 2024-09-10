@@ -50,7 +50,7 @@ Follow the steps on the [Build Model Image](https://www.instill.tech/docs/model/
 
 ### 5. Push and deploy your model
 
-Follow the steps in [Push Your Model Documentation](https://www.instill.tech/docs/model/create/push) to deploy the model.
+Follow the steps on the [Push Model Image](https://www.instill.tech/docs/model/create/push) page to deploy the model to your choice of **Instill Core** or **Instill Cloud**.
 
 ## Implement your own custom model
 
