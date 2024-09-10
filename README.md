@@ -38,7 +38,7 @@ Follow [this section](https://www.instill.tech/docs/quickstart#%EF%B8%8F-instill
 
 ### 2. Create a model namespace
 
-To create a namespace, follow the steps in [Create a Namespace Documentation](https://www.instill.tech/docs/model/create/namespace).
+To create a model namespace, follow the steps on the [Create Namespace](https://www.instill.tech/docs/model/create/namespace) page.
 
 ### 3. Prepare your model
 
