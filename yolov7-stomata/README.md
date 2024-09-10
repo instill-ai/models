@@ -33,7 +33,7 @@ pip install instill-sdk=={version}
 
 #### Get model weights
 
-get the model weight by executing the following command.
+To download the fine-tuned model weights, please execute the following command:
 
 ```bash
 curl -o model.pt https://artifacts.instill.tech/model/yolov7-stomata/model.pt
