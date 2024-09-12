@@ -8,6 +8,7 @@ We have a diverse set of models, each optimized for different AI tasks. Please r
 
 | Model Name                                                     | Task Type             | Description                                                                                                            |
 | -------------------------------------------------------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| [phi-3.5-vision-instruct](./phi-3-5-vision/README.md)          | Chat                  | Phi-3.5-vision is a lightweight, state-of-the-art open multimodal model.                                               |
 | [gte-Qwen2-1.5B-instruct](./gte-Qwen2-1.5B-instruct/README.md) | Embedding             | gte-Qwen2-1.5B-instruct is the latest model in the gte (General Text Embedding) model family.                          |
 | [jina-clip-v1](./jina-clip-v1/README.md)                       | Embedding             | jina-clip-v1 is a state-of-the-art English multimodal (text-image) embedding model.                                    |
 | [llama2-7b-chat](./llama2-7b-chat/README.md)                   | Chat                  | llama2-7b-chat is optimized for dialogue use cases.                                                                    |
