@@ -21,7 +21,8 @@ We have a diverse set of models, each optimized for different AI tasks. Please r
 | [tinyllama](./tinyllama/README.md)                             | Chat                  | tinyllama is a chat model finetuned on top of TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T.                     |
 | [yolov7](./yolov7/README.md)                                   | Object Detection      | yolov7 is a state-of-the-art real-time object detector.                                                                |
 | [yolov7-stomata](./yolov7-stomata/README.md)                   | Instance Segmentation | yolov7-stomata is designed for stomata detection and segmentation.                                                     |
-| [zephyr-7b](./zephyr-7b/README.md)                             | Chat                  | zephyr-7b is a series of language models that are trained to act as helpful.assistants.                                |
+| [zephyr-7b](./zephyr-7b/README.md)                             | Chat                  | zephyr-7b is a series of language models that are trained to act as helpful assistants.                                |
+| [gemma2-27b-it](./gemma2-27b/README.md)                        | Chat                  | Gemma is a family of lightweight, state-of-the-art open models from Google.                                            |
 
 ## Getting Started
 
