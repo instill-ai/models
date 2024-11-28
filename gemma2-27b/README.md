@@ -14,7 +14,7 @@ To ensure smooth integration, please refer to the compatibility matrix below. It
 
 | Model Version | Instill-Core Version | Python-SDK Version |
 | ------------- | -------------------- | ------------------ |
-| v0.1.0        | >v0.39.0-beta        | >0.11.0            |
+| v0.1.0        | >v0.46.0-beta        | >0.16.0            |
 
 > **Note:** Always ensure that you are using compatible versions to avoid unexpected issues.
 
