@@ -6,23 +6,25 @@ Welcome to our Model Repository! This repository houses a collection of machine 
 
 We have a diverse set of models, each optimized for different AI tasks. Please refer to the table below to gain more insight into a specific model, including its configuration, implementation details, and usage. Feel free to check out the README files in the respective model folders:
 
-| Model Name                                                     | Task Type             | Description                                                                                                            |
-| -------------------------------------------------------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| [phi-3.5-vision-instruct](./phi-3-5-vision/README.md)          | Chat                  | Phi-3.5-vision is a lightweight, state-of-the-art open multimodal model.                                               |
-| [gte-Qwen2-1.5B-instruct](./gte-Qwen2-1.5B-instruct/README.md) | Embedding             | gte-Qwen2-1.5B-instruct is the latest model in the gte (General Text Embedding) model family.                          |
-| [jina-clip-v1](./jina-clip-v1/README.md)                       | Embedding             | jina-clip-v1 is a state-of-the-art English multimodal (text-image) embedding model.                                    |
-| [llama2-7b-chat](./llama2-7b-chat/README.md)                   | Chat                  | llama2-7b-chat is optimized for dialogue use cases.                                                                    |
-| [llama3-8b-instruct](./llama3-8b-instruct/README.md)           | Chat                  | llama3-8b-instruct is an instruction tuned generative text model.                                                      |
-| [llamacode-7b](./llamacode-7b/README.md)                       | Completion            | llamacode-7b is designed for general code synthesis and understanding.                                                 |
-| [llava-1-6-13b](./llava-1-6-13b/README.md)                     | Chat                  | llava-1-6-13b is an open-source chatbot trained by fine-tuning LLM on multimodal instruction-following data.           |
-| [mobilenetv2](./mobilenetv2/README.md)                         | Classification        | mobilenetv2 is a lightweight 53-layer deep CNN model with a smaller number of parameters and an input size of 224×224. |
-| [stable-diffusion-xl](./stable-diffusion-xl/README.md)         | Text to Image         | stable-diffusion-xl is a a latent diffusion model for text-to-image synthesis.                                         |
-| [stella-en-1.5B-v5](./stella-en-1.5B-v5/README.md)             | Embedding             | stella-en-1.5B-v5 is trained based on Alibaba-NLP/gte-large-en-v1.5 and Alibaba-NLP/gte-Qwen2-1.5B-instruct.           |
-| [tinyllama](./tinyllama/README.md)                             | Chat                  | tinyllama is a chat model finetuned on top of TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T.                     |
-| [yolov7](./yolov7/README.md)                                   | Object Detection      | yolov7 is a state-of-the-art real-time object detector.                                                                |
-| [yolov7-stomata](./yolov7-stomata/README.md)                   | Instance Segmentation | yolov7-stomata is designed for stomata detection and segmentation.                                                     |
-| [zephyr-7b](./zephyr-7b/README.md)                             | Chat                  | zephyr-7b is a series of language models that are trained to act as helpful assistants.                                |
-| [gemma2-27b-it](./gemma2-27b/README.md)                        | Chat                  | Gemma is a family of lightweight, state-of-the-art open models from Google.                                            |
+| Model Name                                                           | Task Type             | Description                                                                                                            |
+| -------------------------------------------------------------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| [phi-3.5-vision-instruct](./phi-3-5-vision/README.md)                | Chat                  | Phi-3.5-vision is a lightweight, state-of-the-art open multimodal model.                                               |
+| [gte-Qwen2-1.5B-instruct](./gte-Qwen2-1.5B-instruct/README.md)       | Embedding             | gte-Qwen2-1.5B-instruct is the latest model in the gte (General Text Embedding) model family.                          |
+| [jina-clip-v1](./jina-clip-v1/README.md)                             | Embedding             | jina-clip-v1 is a state-of-the-art English multimodal (text-image) embedding model.                                    |
+| [llama2-7b-chat](./llama2-7b-chat/README.md)                         | Chat                  | llama2-7b-chat is optimized for dialogue use cases.                                                                    |
+| [llama3-8b-instruct](./llama3-8b-instruct/README.md)                 | Chat                  | llama3-8b-instruct is an instruction tuned generative text model.                                                      |
+| [llamacode-7b](./llamacode-7b/README.md)                             | Completion            | llamacode-7b is designed for general code synthesis and understanding.                                                 |
+| [llava-1-6-13b](./llava-1-6-13b/README.md)                           | Chat                  | llava-1-6-13b is an open-source chatbot trained by fine-tuning LLM on multimodal instruction-following data.           |
+| [mobilenetv2](./mobilenetv2/README.md)                               | Classification        | mobilenetv2 is a lightweight 53-layer deep CNN model with a smaller number of parameters and an input size of 224×224. |
+| [stable-diffusion-xl](./stable-diffusion-xl/README.md)               | Text to Image         | stable-diffusion-xl is a a latent diffusion model for text-to-image synthesis.                                         |
+| [stella-en-1.5B-v5](./stella-en-1.5B-v5/README.md)                   | Embedding             | stella-en-1.5B-v5 is trained based on Alibaba-NLP/gte-large-en-v1.5 and Alibaba-NLP/gte-Qwen2-1.5B-instruct.           |
+| [tinyllama](./tinyllama/README.md)                                   | Chat                  | tinyllama is a chat model finetuned on top of TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T.                     |
+| [yolov7](./yolov7/README.md)                                         | Object Detection      | yolov7 is a state-of-the-art real-time object detector.                                                                |
+| [yolov7-stomata](./yolov7-stomata/README.md)                         | Instance Segmentation | yolov7-stomata is designed for stomata detection and segmentation.                                                     |
+| [zephyr-7b](./zephyr-7b/README.md)                                   | Chat                  | zephyr-7b is a series of language models that are trained to act as helpful assistants.                                |
+| [gemma2-27b-it](./gemma2-27b/README.md)                              | Chat                  | Gemma is a family of lightweight, state-of-the-art open models from Google.                                            |
+| [qwen2.5-32b-instruct](./qwen2.5-32b-instruct/README.md)             | Chat                  | Qwen2.5 is the latest series of Qwen large language models.                                                            |
+| [qwen2.5-coder-32b-instruct](./qwen2.5-coder-32b-instruct/README.md) | Chat                  | Qwen2.5-Coder is the latest series of Code-Specific Qwen large language models (formerly known as CodeQwen).           |
 
 ## Getting Started
 
