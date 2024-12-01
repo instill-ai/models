@@ -1,4 +1,5 @@
 # pylint: skip-file
+from pathlib import Path
 from typing import List
 from vllm import LLM, SamplingParams, SamplingParams, RequestOutput
 from instill.helpers.ray_config import instill_deployment, InstillDeployable
@@ -11,9 +12,15 @@ from instill.helpers import (
 @instill_deployment
 class Gemma2:
     def __init__(self):
+        files = [
+            f.name for f in Path.cwd().iterdir() if f.is_file() and ".gguf" in f.name
+        ]
         self.model = LLM(
-            model="gemma-2-27b-it",
-            # cpu_offload_gb=,  If host GPU does not have enough vram
+            model=files[0],
+            max_num_seqs=1,
+            gpu_memory_utilization=0.99,
+            enable_chunked_prefill=True,
+            enforce_eager=True,
         )
 
     async def __call__(self, request):
@@ -26,10 +33,12 @@ class Gemma2:
         for inp in chat_inputs:
             params = SamplingParams(
                 n=inp.n,
-                seed=inp.seed,
                 temperature=inp.temperature,
                 top_p=inp.top_p,
             )
+
+            if inp.seed != 0:
+                params.seed = inp.seed
 
             sequences: List[RequestOutput] = self.model.chat(
                 messages=inp.messages,
