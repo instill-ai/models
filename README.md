@@ -28,6 +28,7 @@ We have a diverse set of models, each optimized for different AI tasks. Please r
 | [llama3.2-3b-instruct](./llama3.2-3b-instruct/README.md)                 | Chat                  | The Llama 3.2 collection of multilingual large language models (LLMs) is a collection of pretrained and instruction-tuned generative models in 1B and 3B sizes (text in/text out).                                   |
 | [llama3.2-11b-vision-instruct](./llama3.2-11b-vision-instruct/README.md) | Chat                  | The Llama 3.2-Vision collection of multimodal large language models (LLMs) is a collection of pretrained and instruction-tuned image reasoning generative models in 11B and 90B sizes (text + images in / text out). |
 | [llama3.2-90b-vision-instruct](./llama3.2-90b-vision-instruct/README.md) | Chat                  | The Llama 3.2-Vision collection of multimodal large language models (LLMs) is a collection of pretrained and instruction-tuned image reasoning generative models in 11B and 90B sizes (text + images in / text out). |
+| [functionary-medium-v3.2](./functionary-medium-v3.2/README.md)           | Chat                  | Functionary is a language model that can interpret and execute functions/plugins.                                                                                                                                    |
 
 ## Getting Started
 
