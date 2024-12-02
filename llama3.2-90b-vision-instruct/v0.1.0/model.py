@@ -40,6 +40,7 @@ class Llama32Vision:
                     )
 
             params = SamplingParams(
+                max_tokens=inp.max_tokens,
                 n=inp.n,
                 temperature=inp.temperature,
                 top_p=inp.top_p,

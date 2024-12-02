@@ -25,7 +25,7 @@ torch._inductor.config.coordinate_descent_check_all_directions = True
 
 
 @instill_deployment
-class SdXL:
+class Sd35Large:
     def __init__(self):
         model_id = "stable-diffusion-3.5-large"
         # quantized T5
@@ -97,4 +97,4 @@ class SdXL:
         )
 
 
-entrypoint = InstillDeployable(SdXL).get_deployment_handle()
+entrypoint = InstillDeployable(Sd35Large).get_deployment_handle()
