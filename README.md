@@ -30,6 +30,7 @@ We have a diverse set of models, each optimized for different AI tasks. Please r
 | [llama3.2-90b-vision-instruct](./llama3.2-90b-vision-instruct/README.md) | Chat                  | The Llama 3.2-Vision collection of multimodal large language models (LLMs) is a collection of pretrained and instruction-tuned image reasoning generative models in 11B and 90B sizes (text + images in / text out). |
 | [functionary-medium-v3.2](./functionary-medium-v3.2/README.md)           | Chat                  | Functionary is a language model that can interpret and execute functions/plugins.                                                                                                                                    |
 | [yi-vl-6b](./yi-vl-6b/README.md)                                         | Chat                  | Yi Vision Language (Yi-VL) model is the open-source, multimodal version of the Yi Large Language Model (LLM) series, enabling content comprehension, recognition, and multi-round conversations about images.        |
+| [stable-diffusion-3.5-large](./stable-diffusion-3.5-large/README.md)     | Text to Image         | Stable Diffusion 3.5 Large is a Multimodal Diffusion Transformer (MMDiT) text-to-image model.                                                                                                                        |
 
 ## Getting Started
 
