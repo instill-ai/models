@@ -6,6 +6,8 @@ Functionary is a language model that can interpret and execute functions/plugins
 
 The model determines when to execute functions, whether in parallel or serially, and can understand their outputs. It only triggers functions as needed. Function definitions are given as JSON Schema Objects, similar to OpenAI GPT function calls.
 
+> **Note:** Function calling capability will be added soon!
+
 | Task Type                                                | Description                                                                                 |
 | -------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | [Chat](https://www.instill.tech/docs/model/ai-task#chat) | A task to generate conversational style text output base on single or multi-modality input. |
