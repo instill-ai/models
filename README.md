@@ -31,6 +31,7 @@ We have a diverse set of models, each optimized for different AI tasks. Please r
 | [functionary-medium-v3.2](./functionary-medium-v3.2/README.md)           | Chat                  | Functionary is a language model that can interpret and execute functions/plugins.                                                                                                                                    |
 | [yi-vl-6b](./yi-vl-6b/README.md)                                         | Chat                  | Yi Vision Language (Yi-VL) model is the open-source, multimodal version of the Yi Large Language Model (LLM) series, enabling content comprehension, recognition, and multi-round conversations about images.        |
 | [stable-diffusion-3.5-large](./stable-diffusion-3.5-large/README.md)     | Text to Image         | Stable Diffusion 3.5 Large is a Multimodal Diffusion Transformer (MMDiT) text-to-image model.                                                                                                                        |
+| [qwen2-vl-72b-instruct](./qwen2-vl-72b-instruct/README.md)               | Chat                  | Qwen2-VL, the latest iteration of our Qwen-VL model, representing nearly a year of innovation.                                                                                                                       |
 
 ## Getting Started
 
