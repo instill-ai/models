@@ -17,7 +17,7 @@ class Llama32Instruct:
             "text-generation",
             model="Llama-3.2-3B-Instruct",
             model_kwargs={"torch_dtype": torch.bfloat16},
-            device="cuda",
+            device_map="cuda",
         )
 
     async def __call__(self, request):
