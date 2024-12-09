@@ -21,8 +21,6 @@ class Llama33Instruct:
             gpu_memory_utilization=0.99,
             enable_chunked_prefill=True,
             enforce_eager=True,
-            tensor_parallel_size=2,
-            max_model_len=10000,
         )
 
     async def __call__(self, request):
