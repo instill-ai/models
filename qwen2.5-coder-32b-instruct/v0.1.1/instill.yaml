@@ -1,0 +1,9 @@
+build:
+  gpu: true
+  python_version: "3.11"  # support only 3.11
+  python_packages:
+    - torch==2.5.1
+    - transformers==4.46.3
+    - accelerate==1.1.1
+    - sentencepiece==0.2.0
+    - autoawq==0.2.7
