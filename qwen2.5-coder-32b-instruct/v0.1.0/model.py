@@ -10,7 +10,7 @@ from instill.helpers import (
 
 
 @instill_deployment
-class Qwen25:
+class Qwen25Coder:
     def __init__(self):
         files = [
             f.name for f in Path.cwd().iterdir() if f.is_file() and ".gguf" in f.name
@@ -74,4 +74,4 @@ class Qwen25:
         )
 
 
-entrypoint = InstillDeployable(Qwen25).get_deployment_handle()
+entrypoint = InstillDeployable(Qwen25Coder).get_deployment_handle()
