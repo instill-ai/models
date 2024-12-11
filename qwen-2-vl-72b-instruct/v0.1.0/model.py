@@ -15,7 +15,7 @@ class Qwen2VL:
         model_id = "Qwen2-VL-72B-Instruct-AWQ"
         self.model = Qwen2VLForConditionalGeneration.from_pretrained(
             model_id,
-            torch_dtype=torch.bfloat16,
+            torch_dtype=torch.float16,
             attn_implementation="flash_attention_2",
             device_map="auto",
         )
@@ -62,6 +62,7 @@ class Qwen2VL:
 
             generated_ids = self.model.generate(
                 **inputs,
+                do_sample=True,
                 temperature=inp.temperature,
                 top_p=inp.top_p,
                 max_new_tokens=inp.max_tokens,
