@@ -28,6 +28,11 @@ class Gemma2:
         created = []
         messages = []
         for inp in chat_inputs:
+
+            # gemma does not support system role
+            if inp.messages[0]["role"] == "system":
+                inp.messages.pop(0)
+
             input_text = self.tokenizer.apply_chat_template(
                 inp.messages,
                 tokenize=False,
