@@ -71,16 +71,26 @@ class Qwen2VL:
                 out_ids[len(in_ids) :]
                 for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
             ]
-            output_text = self.processor.batch_decode(
+            outputs = self.processor.batch_decode(
                 generated_ids_trimmed,
                 skip_special_tokens=True,
                 clean_up_tokenization_spaces=False,
             )
 
-            finish_reasons.append(["length"])
-            indexes.append([0])
-            created.append([int(time.time())])
-            messages.append([{"content": output_text, "role": "assistant"}])
+            finish_reasons_per_seq = []
+            indexes_per_seq = []
+            created_per_seq = []
+            messages_per_seq = []
+            for i, out in enumerate(outputs):
+                messages_per_seq.append({"content": out, "role": "assistant"})
+                finish_reasons_per_seq.append("length")
+                indexes_per_seq.append(i)
+                created_per_seq.append(int(time.time()))
+
+            finish_reasons.append(finish_reasons_per_seq)
+            indexes.append(indexes_per_seq)
+            created.append(created_per_seq)
+            messages.append(messages_per_seq)
 
         return construct_task_chat_output(
             request=request,
