@@ -1,6 +1,7 @@
 # pylint: skip-file
 import torch
 import time
+from PIL import Image
 from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
 from instill.helpers.ray_config import instill_deployment, InstillDeployable
 from instill.helpers import (
@@ -51,6 +52,15 @@ class Qwen2VL:
                 add_generation_prompt=True,
                 add_vision_id=True,
             )
+
+            # placeholder image
+            is_image_list_empty = True
+            for img_list in inp.prompt_images:
+                if len(img_list) > 0:
+                    is_image_list_empty = False
+
+            if is_image_list_empty:
+                inp.prompt_images = [[Image.new("RGB", (1, 1))]]
 
             inputs = self.processor(
                 text=[prompt],
