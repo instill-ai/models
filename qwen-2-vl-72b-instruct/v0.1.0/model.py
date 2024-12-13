@@ -1,6 +1,7 @@
 # pylint: skip-file
 import torch
 import time
+from PIL import Image
 from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
 from instill.helpers.ray_config import instill_deployment, InstillDeployable
 from instill.helpers import (
@@ -47,15 +48,22 @@ class Qwen2VL:
                 message_list.append(d)
                 image_list.extend(images)
 
+            # placeholder image
+            # minimum factor is 28
+            if len(image_list) == 0:
+                message_list[0]["content"].insert(0, {"type": "image"})
+                image_list.append(Image.new("RGB", (28, 28)))
+
             prompt = self.processor.apply_chat_template(
                 message_list,
                 tokenize=False,
                 add_generation_prompt=True,
+                add_vision_id=True,
             )
 
             inputs = self.processor(
                 text=[prompt],
-                images=image_list,
+                images=[image_list],
                 padding=True,
                 return_tensors="pt",
             ).to("cuda")
