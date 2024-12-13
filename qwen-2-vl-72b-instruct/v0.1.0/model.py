@@ -31,7 +31,6 @@ class Qwen2VL:
         for inp in chat_inputs:
 
             message_list = []
-            image_list = []
             for message, images in zip(inp.messages, inp.prompt_images):
                 d = {
                     "role": message["role"],
@@ -45,17 +44,17 @@ class Qwen2VL:
                 for _ in range(len(images)):
                     d["content"].insert(0, {"type": "image"})
                 message_list.append(d)
-                image_list.extend(images)
 
             prompt = self.processor.apply_chat_template(
                 message_list,
                 tokenize=False,
                 add_generation_prompt=True,
+                add_vision_id=True,
             )
 
             inputs = self.processor(
                 text=[prompt],
-                images=image_list,
+                images=inp.prompt_images,
                 padding=True,
                 return_tensors="pt",
             ).to("cuda")
