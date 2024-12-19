@@ -7,4 +7,3 @@ build:
     - diffusers==0.31.0
     - sentencepiece==0.2.0
     - accelerate==1.1.1
-    - bitsandbytes==0.44.1

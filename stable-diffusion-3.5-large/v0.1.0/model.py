@@ -35,7 +35,6 @@ class Sd35Large:
         #     quantization_config=quantization_config,
         # )
 
-        # compiled components
         self.model = StableDiffusion3Pipeline.from_pretrained(
             model_id,
             # text_encoder_3=None,
@@ -43,6 +42,7 @@ class Sd35Large:
             torch_dtype=torch.bfloat16,
         ).to("cuda")
         self.model.set_progress_bar_config(disable=True)
+        # compiled components
         self.model.transformer.to(memory_format=torch.channels_last)
         self.model.vae.to(memory_format=torch.channels_last)
 
@@ -53,10 +53,53 @@ class Sd35Large:
             self.model.vae.decode, mode="max-autotune", fullgraph=True
         )
 
+        self.ratio_map = {
+            "9:21": {
+                "width": 672,
+                "height": 1600,
+            },
+            "9:16": {
+                "width": 768,
+                "height": 1344,
+            },
+            "2:3": {
+                "width": 768,
+                "height": 1152,
+            },
+            "4:5": {
+                "width": 912,
+                "height": 1136,
+            },
+            "5:4": {
+                "width": 1136,
+                "height": 912,
+            },
+            "3:2": {
+                "width": 1152,
+                "height": 768,
+            },
+            "16:9": {
+                "width": 1344,
+                "height": 768,
+            },
+            "21:9": {
+                "width": 1600,
+                "height": 672,
+            },
+            "1:1": {
+                "width": 1024,
+                "height": 1024,
+            },
+        }
+
         # Warm Up
         prompt = "a photo of a cat holding a sign that says hello world"
-        for _ in range(3):
-            _ = self.model(prompt=prompt, generator=torch.manual_seed(1))
+        for ratio_dict in self.ratio_map.values():
+            _ = self.model(
+                prompt=prompt,
+                height=ratio_dict["height"],
+                width=ratio_dict["width"],
+            )
 
     async def __call__(self, request):
         inputs = await parse_task_text_to_image_input(request=request)
@@ -73,10 +116,10 @@ class Sd35Large:
                 negative_prompt=inp.negative_prompt,
                 num_images_per_prompt=inp.n,
                 max_sequence_length=512,
-                num_inference_steps=28,
-                height=1024,
-                width=1024,
-                guidance_scale=7.0,
+                num_inference_steps=45,
+                height=self.ratio_map[inp.aspect_ratio]["height"],
+                width=self.ratio_map[inp.aspect_ratio]["width"],
+                guidance_scale=4.5,
             ).images
 
             imgs = []
