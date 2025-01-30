@@ -13,7 +13,7 @@ from instill.helpers import (
 @instill_deployment
 class Qwen25VL:
     def __init__(self):
-        model_id = "Qwen/Qwen2.5-VL-3B-Instruct"
+        model_id = "Qwen2.5-VL-3B-Instruct"
         self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
             model_id,
             torch_dtype=torch.float16,

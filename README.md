@@ -33,6 +33,7 @@ We have a diverse set of models, each optimized for different AI tasks. Please r
 | [stable-diffusion-3.5-large](./stable-diffusion-3.5-large/README.md)       | Text to Image         | Stable Diffusion 3.5 Large is a Multimodal Diffusion Transformer (MMDiT) text-to-image model.                                                                                                                        |
 | [qwen-2-vl-72b-instruct](./qwen-2-vl-72b-instruct/README.md)               | Chat                  | Qwen2-VL, the latest iteration of our Qwen-VL model, representing nearly a year of innovation.                                                                                                                       |
 | [llama-3-3-70b-instruct](./llama-3-3-70b-instruct/README.md)               | Chat                  | The Meta Llama 3.3 multilingual large language model (LLM) is a pretrained and instruction tuned generative model in 70B (text in/text out).                                                                         |
+| [qwen-2-5-vl-3b-instruct](./qwen-2-5-vl-3b-instruct/README.md)             | Chat                  | Qwen2.5-VL is the latest addition to the Qwen family, featuring enhanced visual understanding, agentic capabilities, visual localization, and structured output generation.                                            |
 
 ## Getting Started
 
