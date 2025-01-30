@@ -1,0 +1,7 @@
+build:
+  gpu: true
+  python_version: "3.11"  # support only 3.11
+  python_packages:
+    - transformers==4.48.1
+    - torch==2.6.0
+    - accelerate==1.3.0
