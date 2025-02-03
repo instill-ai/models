@@ -16,9 +16,9 @@ class Qwen25VL:
         model_id = "Qwen2.5-VL-3B-Instruct"
         self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
             model_id,
-            torch_dtype=torch.float16,
-            #attn_implementation="flash_attention_2",
-            device_map="cpu",
+            torch_dtype=torch.bfloat16,
+            attn_implementation="flash_attention_2",
+            device_map="auto",
         )
         self.processor = AutoProcessor.from_pretrained(model_id)
 

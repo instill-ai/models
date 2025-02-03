@@ -2,8 +2,7 @@
 
 ## 📖 Introduction
 
-Qwen2-VL, the latest iteration of our Qwen-VL model, representing nearly a year of innovation.
-Key Enhancements:
+Key Features:
 - SoTA understanding of images of various resolution & ratio: Qwen2-VL achieves state-of-the-art performance on visual understanding benchmarks, including MathVista, DocVQA, RealWorldQA, MTVQA, etc.
 
 - Understanding videos of 20min+: Qwen2-VL can understand videos over 20 minutes for high-quality video-based question answering, dialog, content creation, etc.

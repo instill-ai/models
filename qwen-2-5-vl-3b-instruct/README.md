@@ -66,18 +66,19 @@ The input payload should strictly follow the the below format
 A successful response will return a similar output to that shown below.
 
 ```bash
-2024-12-04 02:45:16,462.462 INFO     [Instill] Starting model image...
-2024-12-04 02:45:32,050.050 INFO     [Instill] Deploying model...
-2024-12-04 02:46:05,012.012 INFO     [Instill] Running inference...
-2024-12-03 02:46:12,479.479 INFO     [Instill] Outputs:
-[{'data': {'choices': [{'created': 1733251572,
+2025-02-03 22:20:11,333.333 INFO     [Instill] Starting model image...
+2025-02-03 22:20:16,673.673 INFO     [Instill] Deploying model...
+2025-02-03 22:20:24,516.516 INFO     [Instill] Running inference...
+2025-02-03 14:20:28,373.373 INFO     [Instill] Outputs:
+[{'data': {'choices': [{'created': 1738621228,
                         'finish-reason': 'length',
                         'index': 0,
-                        'message': {'content': ['A brown bear sitting on a '
-                                                'grassy field, with one paw '
-                                                'raised as if waving.'],
+                        'message': {'content': 'A brown bear is sitting '
+                                               'upright on its hind legs, with '
+                                               'one paw raised as if waving or '
+                                               'greeting someone.',
                                     'role': 'assistant'}}]}}]
-2024-12-04 02:46:16,235.235 INFO     [Instill] Done
+2025-02-03 22:20:31,678.678 INFO     [Instill] Done
 ```
 
 Here is the list of flags supported by `instill run` command
