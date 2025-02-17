@@ -1,0 +1,5 @@
+build:
+  gpu: true
+  python_version: "3.11"
+  python_packages:
+    - docling==2.23.0
