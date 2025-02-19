@@ -47,7 +47,7 @@ where `$HOME/path/to/model/version/docling-models` is in the same directory as t
 After you've built the model image, and before pushing the model onto any **Instill Core** instance, you can test if the model can be successfully run locally first, by running the following command:
 
 ```bash
-instill run admin/docling -t v0.1.0 -g -i '{"pdf_content": <INSERT BASE64 STRING>}'
+instill run admin/docling -t v0.1.0 -g -i '{"doc_content": <INSERT BASE64 STRING>}'
 ```
 
 For convenience, we have included a sample JSON payload containing a base64 encoded PDF file.
@@ -59,7 +59,7 @@ The input payload should strictly follow the the below format
 
 ```json
 {
-  "pdf_content": "<BASE64 STRING>"
+  "doc_content": "<BASE64 STRING>"
 }
 ```
 
@@ -126,7 +126,7 @@ A successful response will return a similar output to that shown below.
                      'hello@reallygreatsite.com.\n'
                      '\n'
                      'Thank you for your business.'],
-  'page_images': ['data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAC ... ']}]
+  'pages_with_images': []}]
 2025-02-17 22:30:23,039.039 INFO     [Instill] Done
 ```
 
