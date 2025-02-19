@@ -1,15 +1,17 @@
-# Qwen2 VL 72B Instruct
+# Qwen2.5 VL 3B Instruct
 
 ## 📖 Introduction
 
-Key Features:
-- SoTA understanding of images of various resolution & ratio: Qwen2-VL achieves state-of-the-art performance on visual understanding benchmarks, including MathVista, DocVQA, RealWorldQA, MTVQA, etc.
+The latest addition to the Qwen family: Qwen2.5-VL.
 
-- Understanding videos of 20min+: Qwen2-VL can understand videos over 20 minutes for high-quality video-based question answering, dialog, content creation, etc.
+Key Enhancements:
+- Understand things visually: Qwen2.5-VL is not only proficient in recognizing common objects such as flowers, birds, fish, and insects, but it is highly capable of analyzing texts, charts, icons, graphics, and layouts within images.
 
-- Agent that can operate your mobiles, robots, etc.: with the abilities of complex reasoning and decision making, Qwen2-VL can be integrated with devices like mobile phones, robots, etc., for automatic operation based on visual environment and text instructions.
+- Being agentic: Qwen2.5-VL directly plays as a visual agent that can reason and dynamically direct tools, which is capable of computer use and phone use.
 
-- Multilingual Support: to serve global users, besides English and Chinese, Qwen2-VL now supports the understanding of texts in different languages inside images, including most European languages, Japanese, Korean, Arabic, Vietnamese, etc.
+- Capable of visual localization in different formats: Qwen2.5-VL can accurately localize objects in an image by generating bounding boxes or points, and it can provide stable JSON outputs for coordinates and attributes.
+
+- Generating structured outputs: for data like scans of invoices, forms, tables, etc. Qwen2.5-VL supports structured outputs of their contents, benefiting usages in finance, commerce, etc.
 
 | Task Type                                                | Description                                                                                 |
 | -------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
@@ -42,7 +44,7 @@ pip install instill-sdk=={version}
 To download the fine-tuned model weights, please execute the following command:
 
 ```bash
-git clone https://huggingface.co/Qwen/Qwen2-VL-72B-Instruct-AWQ
+git clone https://huggingface.co/Qwen/Qwen2.5-VL-3B-Instruct
 ```
 
 ## Test model image
@@ -50,7 +52,7 @@ git clone https://huggingface.co/Qwen/Qwen2-VL-72B-Instruct-AWQ
 After you've built the model image, and before pushing the model onto any **Instill Core** instance, you can test if the model can be successfully run locally first, by running the following command:
 
 ```bash
-instill run admin/qwen-2-vl-72b-instruct -g -i '{"prompt": "whats in the pic? describe in one sentence", "image-url": "https://artifacts.instill.tech/imgs/bear.jpg"}'
+instill run admin/qwen-2-5-vl-3b-instruct -g -i '{"prompt": "whats in the pic? describe in one sentence", "image-url": "https://artifacts.instill.tech/imgs/bear.jpg"}'
 ```
 
 The input payload should strictly follow the the below format
@@ -64,18 +66,19 @@ The input payload should strictly follow the the below format
 A successful response will return a similar output to that shown below.
 
 ```bash
-2024-12-04 02:45:16,462.462 INFO     [Instill] Starting model image...
-2024-12-04 02:45:32,050.050 INFO     [Instill] Deploying model...
-2024-12-04 02:46:05,012.012 INFO     [Instill] Running inference...
-2024-12-03 02:46:12,479.479 INFO     [Instill] Outputs:
-[{'data': {'choices': [{'created': 1733251572,
+2025-02-03 22:20:11,333.333 INFO     [Instill] Starting model image...
+2025-02-03 22:20:16,673.673 INFO     [Instill] Deploying model...
+2025-02-03 22:20:24,516.516 INFO     [Instill] Running inference...
+2025-02-03 14:20:28,373.373 INFO     [Instill] Outputs:
+[{'data': {'choices': [{'created': 1738621228,
                         'finish-reason': 'length',
                         'index': 0,
-                        'message': {'content': ['A brown bear sitting on a '
-                                                'grassy field, with one paw '
-                                                'raised as if waving.'],
+                        'message': {'content': 'A brown bear is sitting '
+                                               'upright on its hind legs, with '
+                                               'one paw raised as if waving or '
+                                               'greeting someone.',
                                     'role': 'assistant'}}]}}]
-2024-12-04 02:46:16,235.235 INFO     [Instill] Done
+2025-02-03 22:20:31,678.678 INFO     [Instill] Done
 ```
 
 Here is the list of flags supported by `instill run` command
