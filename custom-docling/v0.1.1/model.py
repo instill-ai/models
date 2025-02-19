@@ -3,10 +3,9 @@ import io
 import base64
 
 from instill.helpers.ray_config import instill_deployment, InstillDeployable
-from instill.helpers import (
-    parse_custom_input,
-    construct_custom_output
-)
+from instill.helpers import parse_custom_input, construct_custom_output
+
+from utils import process_document
 
 from docling.document_converter import (
     DocumentConverter,
@@ -29,32 +28,23 @@ class DocumentProcessor:
     def __init__(self):
         """Initialize document processing pipeline"""
         self.pipeline_options = PdfPipelineOptions(artifacts_path="docling-models")
-        self.pipeline_options.images_scale = 150/72.0
+        self.pipeline_options.images_scale = 150 / 72.0
         self.pipeline_options.generate_page_images = True
         self.pipeline_options.generate_picture_images = True
         self.pipeline_options.do_formula_enrichment = True
         self.pipeline_options.accelerator_options = AcceleratorOptions(
-            num_threads=8,
-            device=AcceleratorDevice.CUDA
+            num_threads=8, device=AcceleratorDevice.CUDA
         )
         self.pipeline_options.do_picture_description = False
         self.converter = DocumentConverter(
-            allowed_formats=[
-                InputFormat.PDF,
-                InputFormat.PPTX,
-                InputFormat.DOCX
-            ],
+            allowed_formats=[InputFormat.PDF, InputFormat.PPTX, InputFormat.DOCX],
             format_options={
                 InputFormat.PDF: PdfFormatOption(
                     pipeline_options=self.pipeline_options
                 ),
-                InputFormat.PPTX: PowerpointFormatOption(
-                    pipeline_cls=SimplePipeline
-                ),
-                InputFormat.DOCX: WordFormatOption(
-                    pipeline_cls=SimplePipeline
-                )
-            }
+                InputFormat.PPTX: PowerpointFormatOption(pipeline_cls=SimplePipeline),
+                InputFormat.DOCX: WordFormatOption(pipeline_cls=SimplePipeline),
+            },
         )
 
     async def __call__(self, request):
@@ -65,23 +55,30 @@ class DocumentProcessor:
         outputs = []
         for input_data in inputs:
             # Process the document
-            markdown_pages, extracted_images, pages_with_images = self._process_document(
-                input_data["doc_content"]
+            markdown_pages, extracted_images, pages_with_images = (
+                self._process_document(input_data["data"]["doc_content"])
             )
 
             # Structure the output
             output = {
-                "markdown_pages": markdown_pages,
-                "extracted_images": extracted_images,
-                "pages_with_images": pages_with_images
+                "data": {
+                    "markdown_pages": markdown_pages,
+                    "extracted_images": extracted_images,
+                    "pages_with_images": pages_with_images,
+                }
             }
             outputs.append(output)
 
         # Return formatted output
         return construct_custom_output(request, outputs)
 
-    def _process_document(self, base64_content: str) -> Tuple[List[str], List[str], List[int]]:
+    def _process_document(
+        self, base64_content: str
+    ) -> Tuple[List[str], List[str], List[int]]:
         """Internal method to process a single document"""
+
+        base64_content = process_document(base64_content)
+
         # Decode base64 content to bytes
         doc_content = base64.b64decode(base64_content)
 
@@ -100,7 +97,7 @@ class DocumentProcessor:
             if isinstance(element, PictureItem):
                 # For DOCX files, we'll use a default page number of 1 since the number of pages aren't properly registered (Docling bug)
                 page_no = element.prov[0].page_no if element.prov else 1
-                if hasattr(element, 'image') and element.image is not None:
+                if hasattr(element, "image") and element.image is not None:
                     extracted_images.append(str(element.image.uri))
                     pages_with_images.append(page_no)
         # For DOCX files, we need to handle the case where num_pages() returns 0
