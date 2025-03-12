@@ -1,6 +1,7 @@
 from typing import List, Tuple
 import io
 import base64
+import asyncio
 
 from instill.helpers.ray_config import instill_deployment, InstillDeployable
 from instill.helpers import parse_custom_input, construct_custom_output
@@ -56,7 +57,7 @@ class DocumentProcessor:
         for input_data in inputs:
             # Process the document
             markdown_pages, extracted_images, pages_with_images = (
-                self._process_document(input_data["data"]["doc_content"])
+                await self._process_document(input_data["data"]["doc_content"])
             )
 
             # Structure the output
@@ -72,12 +73,12 @@ class DocumentProcessor:
         # Return formatted output
         return construct_custom_output(request, outputs)
 
-    def _process_document(
+    async def _process_document(
         self, base64_content: str
     ) -> Tuple[List[str], List[str], List[int]]:
         """Internal method to process a single document"""
 
-        base64_content = process_document(base64_content)
+        base64_content = await process_document(base64_content)
 
         # Decode base64 content to bytes
         doc_content = base64.b64decode(base64_content)
@@ -87,7 +88,7 @@ class DocumentProcessor:
         source = DocumentStream(name="doc", stream=doc_stream)
 
         # Convert using DocumentStream
-        result = self.converter.convert(source)
+        result = await asyncio.to_thread(self.converter.convert, source)
 
         extracted_images = []
         markdown_pages = []
