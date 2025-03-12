@@ -4,4 +4,5 @@ build:
   system_packages:
     - libreoffice
   python_packages:
+    - aiofiles==24.1.0
     - docling==2.23.0
