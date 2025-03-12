@@ -100,7 +100,7 @@ async def process_document(base64_string: str) -> str:
             # Convert the file
             converted_path = await convert_file(file_path, format_conversions[prefix])
             # Get base64 of converted file
-            base64_string = get_base64_content(converted_path)
+            base64_string = await get_base64_content(converted_path)
             # Clean up converted file
             converted_path.unlink()
         except Exception as e:
