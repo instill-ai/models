@@ -16,6 +16,7 @@ To ensure smooth integration, please refer to the compatibility matrix below. It
 | ------------- | -------------------- | ------------------ |
 | v0.0.1        | <=v0.39.0-beta       | <=0.11.0, >=0.10.2 |
 | v0.1.0        | >v0.39.0-beta        | >0.11.0            |
+| v0.2.0        | >v0.39.0-beta        | >0.16.0            |
 
 > **Note:** Always ensure that you are using compatible versions to avoid unexpected issues.
 
@@ -36,7 +37,11 @@ pip install instill-sdk=={version}
 To download the fine-tuned model weights, please execute the following command:
 
 ```bash
+# for v0.0.1 and  v0.1.0
 curl -o model.pt https://artifacts.instill.tech/model/yolov7-stomata/model.pt
+# for v0.2.0
+curl -o outerlinebest.pt https://artifacts.instill.tech/model/yolov7-stomata/outerlinebest.pt
+curl -o porebest.pt https://artifacts.instill.tech/model/yolov7-stomata/porebest.pt
 ```
 
 ## Test model image
