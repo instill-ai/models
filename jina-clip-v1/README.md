@@ -4,9 +4,9 @@
 
 [jina-clip-v1](https://huggingface.co/jinaai/jina-clip-v1) is a state-of-the-art English multimodal (text-image) embedding model.
 
-| Task Type                                                          | Description                                                                                                          |
-| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| [Embedding](https://www.instill.tech/docs/model/ai-task#embedding) | A task to generate means of representing objects like text, images and audio as points in a continuous vector space. |
+| Task Type                                                            | Description                                                                                                          |
+| -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| [Embedding](https://www.instill-ai.dev/docs/model/ai-task#embedding) | A task to generate means of representing objects like text, images and audio as points in a continuous vector space. |
 
 ## 🔄 Compatibility Matrix
 

@@ -11,9 +11,9 @@ Key Features:
 
 - Multilingual Support: to serve global users, besides English and Chinese, Qwen2-VL now supports the understanding of texts in different languages inside images, including most European languages, Japanese, Korean, Arabic, Vietnamese, etc.
 
-| Task Type                                                | Description                                                                                 |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| [Chat](https://www.instill.tech/docs/model/ai-task#chat) | A task to generate conversational style text output base on single or multi-modality input. |
+| Task Type                                                  | Description                                                                                 |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| [Chat](https://www.instill-ai.dev/docs/model/ai-task#chat) | A task to generate conversational style text output base on single or multi-modality input. |
 
 ## 🔄 Compatibility Matrix
 

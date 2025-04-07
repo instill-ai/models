@@ -4,9 +4,9 @@
 
 [stella_en_1.5B_v5](https://huggingface.co/dunzhang/stella_en_1.5B_v5) are trained based on Alibaba-NLP/gte-large-en-v1.5 and Alibaba-NLP/gte-Qwen2-1.5B-instruct.
 
-| Task Type                                                          | Description                                                                                                          |
-| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| [Embedding](https://www.instill.tech/docs/model/ai-task#embedding) | A task to generate means of representing objects like text, images and audio as points in a continuous vector space. |
+| Task Type                                                            | Description                                                                                                          |
+| -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| [Embedding](https://www.instill-ai.dev/docs/model/ai-task#embedding) | A task to generate means of representing objects like text, images and audio as points in a continuous vector space. |
 
 ## 🔄 Compatibility Matrix
 

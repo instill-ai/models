@@ -4,9 +4,9 @@
 
 [yolov7-stomata](https://github.com/YaoChengLab/StomaVision) is a machine learning model designed for stomata detection and segmentation, check out the link to lean more.
 
-| Task Type                                                                                  | Description                                                                                         |
-| ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
-| [Instance Segmentation](https://www.instill.tech/docs/model/ai-task#instance-segmentation) | A vision task to detect and delineate multiple objects of pre-defined categories in an input image. |
+| Task Type                                                                                    | Description                                                                                         |
+| -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| [Instance Segmentation](https://www.instill-ai.dev/docs/model/ai-task#instance-segmentation) | A vision task to detect and delineate multiple objects of pre-defined categories in an input image. |
 
 ## 🔄 Compatibility Matrix
 

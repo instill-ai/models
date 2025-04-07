@@ -4,9 +4,9 @@
 
 [Stable Diffusion 3.5 Large](https://huggingface.co/stabilityai/stable-diffusion-3.5-large) is a Multimodal Diffusion Transformer (MMDiT) text-to-image model that features improved performance in image quality, typography, complex prompt understanding, and resource-efficiency.
 
-| Task Type                                                                  | Description                                                                                                                                                                           |
-| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [Text to Image](https://www.instill.tech/docs/model/ai-task#text-to-image) | A task to generate images from text inputs. Generally, the task takes descriptive text prompts as the input, and outputs generated images in Base64 format based on the text prompts. |
+| Task Type                                                                    | Description                                                                                                                                                                           |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Text to Image](https://www.instill-ai.dev/docs/model/ai-task#text-to-image) | A task to generate images from text inputs. Generally, the task takes descriptive text prompts as the input, and outputs generated images in Base64 format based on the text prompts. |
 
 ## 🔄 Compatibility Matrix
 

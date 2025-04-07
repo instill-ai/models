@@ -13,9 +13,9 @@ Key Enhancements:
 
 - Generating structured outputs: for data like scans of invoices, forms, tables, etc. Qwen2.5-VL supports structured outputs of their contents, benefiting usages in finance, commerce, etc.
 
-| Task Type                                                | Description                                                                                 |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| [Chat](https://www.instill.tech/docs/model/ai-task#chat) | A task to generate conversational style text output base on single or multi-modality input. |
+| Task Type                                                  | Description                                                                                 |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| [Chat](https://www.instill-ai.dev/docs/model/ai-task#chat) | A task to generate conversational style text output base on single or multi-modality input. |
 
 ## 🔄 Compatibility Matrix
 

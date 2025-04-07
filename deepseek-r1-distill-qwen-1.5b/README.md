@@ -13,9 +13,9 @@ Key features:
 - Compatible with standard transformer-based architectures
 - Optimized for deployment in resource-constrained environments
 
-| Task Type                                                          | Description                                                                                                          |
-| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| [Chat](https://www.instill.tech/docs/model/ai-task#chat) | A task to generate conversational style text output  |
+| Task Type                                                  | Description                                         |
+| ---------------------------------------------------------- | --------------------------------------------------- |
+| [Chat](https://www.instill-ai.dev/docs/model/ai-task#chat) | A task to generate conversational style text output |
 
 ## 🔄 Compatibility Matrix
 

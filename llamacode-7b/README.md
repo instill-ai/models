@@ -4,9 +4,9 @@
 
 [Code Llama](https://huggingface.co/codellama/CodeLlama-7b-hf) is a collection of pretrained and fine-tuned generative text models ranging in scale from 7 billion to 34 billion parameters. This is the repository for the base 7B version in the Hugging Face Transformers format. This model is designed for general code synthesis and understanding.
 
-| Task Type                                                            | Description                                                          |
-| -------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| [Completion](https://www.instill.tech/docs/model/ai-task#completion) | A task to generate natural continuation texts based on input prompt. |
+| Task Type                                                              | Description                                                          |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| [Completion](https://www.instill-ai.dev/docs/model/ai-task#completion) | A task to generate natural continuation texts based on input prompt. |
 
 ## 🔄 Compatibility Matrix
 

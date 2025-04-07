@@ -4,9 +4,9 @@
 
 [SDXL](https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0) consists of an ensemble of experts pipeline for latent diffusion: In a first step, the base model is used to generate (noisy) latents, which are then further processed with a refinement model specialized for the final denoising steps.
 
-| Task Type                                                                  | Description                                                                                                                                                                           |
-| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [Text to Image](https://www.instill.tech/docs/model/ai-task#text-to-image) | A task to generate images from text inputs. Generally, the task takes descriptive text prompts as the input, and outputs generated images in Base64 format based on the text prompts. |
+| Task Type                                                                    | Description                                                                                                                                                                           |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Text to Image](https://www.instill-ai.dev/docs/model/ai-task#text-to-image) | A task to generate images from text inputs. Generally, the task takes descriptive text prompts as the input, and outputs generated images in Base64 format based on the text prompts. |
 
 ## 🔄 Compatibility Matrix
 

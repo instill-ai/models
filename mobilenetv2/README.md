@@ -4,9 +4,9 @@
 
 [MobileNetV2](https://arxiv.org/abs/1801.04381) is a new mobile architecture that improves the state of the art performance of mobile models on multiple tasks and benchmarks as well as across a spectrum of different model sizes.
 
-| Task Type                                                                          | Description                                                                         |
-| ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| [Classification](https://www.instill.tech/docs/model/ai-task#image-classification) | Vision task to assign a single pre-defined category label to an entire input image. |
+| Task Type                                                                            | Description                                                                         |
+| ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| [Classification](https://www.instill-ai.dev/docs/model/ai-task#image-classification) | Vision task to assign a single pre-defined category label to an entire input image. |
 
 ## 🔄 Compatibility Matrix
 
