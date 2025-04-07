@@ -4,9 +4,9 @@
 
 [gte-Qwen2-1.5B-instruct](https://huggingface.co/Alibaba-NLP/gte-Qwen2-1.5B-instruct) is the latest model in the gte (General Text Embedding) model family. The model is built on Qwen2-1.5B LLM model and use the same training data and strategies as the gte-Qwen2-7B-instruct model.
 
-| Task Type                                                          | Description                                                                                                          |
-| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| [Embedding](https://www.instill.tech/docs/model/ai-task#embedding) | A task to generate means of representing objects like text, images and audio as points in a continuous vector space. |
+| Task Type                                                            | Description                                                                                                          |
+| -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| [Embedding](https://www.instill-ai.dev/docs/model/ai-task#embedding) | A task to generate means of representing objects like text, images and audio as points in a continuous vector space. |
 
 ## 🔄 Compatibility Matrix
 

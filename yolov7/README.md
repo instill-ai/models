@@ -4,9 +4,9 @@
 
 [yolov7](https://github.com/WongKinYiu/yolov7) is a machine learning model trained for object detection task, check out the [paper](https://arxiv.org/abs/2207.02696) to lean more.
 
-| Task Type                                                                        | Description                                                                             |
-| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| [Object Detection](https://www.instill.tech/docs/model/ai-task#object-detection) | A vision task to localise multiple objects of pre-defined categories in an input image. |
+| Task Type                                                                          | Description                                                                             |
+| ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| [Object Detection](https://www.instill-ai.dev/docs/model/ai-task#object-detection) | A vision task to localise multiple objects of pre-defined categories in an input image. |
 
 ## 🔄 Compatibility Matrix
 

@@ -1,6 +1,6 @@
 # Instill AI Models
 
-Welcome to our Model Repository! This repository houses a collection of machine learning models designed to perform various AI tasks. They are all prepared and ready to be seamlessly served on [**Instill Core**](https://www.instill.tech/docs/core/introduction) or [**Instill Cloud**](https://www.instill.tech/docs/cloud/introduction) via our MLOps/LLMOps platform [**Instill Model**](https://www.instill.tech/docs/model/introduction).
+Welcome to our Model Repository! This repository houses a collection of machine learning models designed to perform various AI tasks. They are all prepared and ready to be seamlessly served on [**Instill Core**](https://www.instill-ai.dev/docs/core/introduction) via our MLOps/LLMOps platform [**Instill Model**](https://www.instill-ai.dev/docs/model/introduction).
 
 ## Available Models
 
@@ -45,15 +45,11 @@ We leverage Instill Core to provide a seamless experience for serving models. Fo
 
 #### Self-host 🔮 Instill Core
 
-Follow [this section](https://www.instill.tech/docs/quickstart#-instill-core) of our quick start guide to get it up and running with self-hosting **Instill Core** on a local or remote instance.
-
-#### ☁️ Instill Cloud
-
-Follow [this section](https://www.instill.tech/docs/quickstart#%EF%B8%8F-instill-cloud) of our quick start guide to get it up and running on **Instill Cloud**, our fully managed public cloud service that provides you with access to all the features of **Instill Core** without the burden of infrastructure management.
+Follow [this section](https://www.instill-ai.dev/docs/quickstart#-instill-core) of our quick start guide to get it up and running with self-hosting **Instill Core** on a local or remote instance.
 
 ### 2. Create a model namespace
 
-To create a model namespace, follow the steps on the [Create Namespace](https://www.instill.tech/docs/model/create/namespace) page.
+To create a model namespace, follow the steps on the [Create Namespace](https://www.instill-ai.dev/docs/model/create/namespace) page.
 
 ### 3. Prepare your model
 
@@ -61,15 +57,15 @@ Find the model you want to serve and download the desired version folder. Also, 
 
 ### 4. Build your model
 
-Follow the steps on the [Build Model Image](https://www.instill.tech/docs/model/create/build) page, and remember to install the `python-sdk` version according to the compatibility matrix in each model's README.
+Follow the steps on the [Build Model Image](https://www.instill-ai.dev/docs/model/create/build) page, and remember to install the `python-sdk` version according to the compatibility matrix in each model's README.
 
 ### 5. Push and deploy your model
 
-Follow the steps on the [Push Model Image](https://www.instill.tech/docs/model/create/push) page to deploy the model to your choice of **Instill Core** or **Instill Cloud**.
+Follow the steps on the [Push Model Image](https://www.instill-ai.dev/docs/model/create/push) page to deploy the model to your choice of **Instill Core** or **Instill Cloud**.
 
 ## Implement your own custom model
 
-Follow the steps on the [Prepare Model](https://www.instill.tech/docs/model/create/prepare) page to see how to implement your own custom model that can be served on **Instill Core** and **Instill Cloud**! You can also checkout the [step-by-step tutorial](https://www.instill.tech/blog/model-serving-on-instill-core) which walks you through the process of serving your own custom model on **Instill Core**.
+Follow the steps on the [Prepare Model](https://www.instill-ai.dev/docs/model/create/prepare) page to see how to implement your own custom model that can be served on **Instill Core** and **Instill Cloud**! You can also checkout the [step-by-step tutorial](https://www.instill-ai.dev/blog/model-serving-on-instill-core) which walks you through the process of serving your own custom model on **Instill Core**.
 
 ## 🤝 Contributing
 
@@ -77,7 +73,7 @@ We welcome contributions! Please see our [CONTRIBUTING.md](https://github.com/in
 
 ## 🛠 Troubleshooting
 
-If you encounter any issues, please check our [Documentation](https://www.instill.tech/docs/model/introduction) or open an [issue](https://github.com/instill-ai/instill-core/issues) on GitHub.
+If you encounter any issues, please check our [Documentation](https://www.instill-ai.dev/docs/model/introduction) or open an [issue](https://github.com/instill-ai/instill-core/issues) on GitHub.
 
 ## 📜 License
 

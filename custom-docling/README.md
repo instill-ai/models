@@ -4,9 +4,9 @@
 
 This is a custom model using `TASK_CUSTOM` to parse documents.
 
-| Task Type                                                    | Description                                   |
-| ------------------------------------------------------------ | --------------------------------------------- |
-| [Custom](https://www.instill.tech/docs/model/ai-task#custom) | A custom task for arbitrary input and output. |
+| Task Type                                                      | Description                                   |
+| -------------------------------------------------------------- | --------------------------------------------- |
+| [Custom](https://www.instill-ai.dev/docs/model/ai-task#custom) | A custom task for arbitrary input and output. |
 
 ## 🔄 Compatibility Matrix
 
