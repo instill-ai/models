@@ -103,7 +103,7 @@ class DocumentProcessor:
             self.converter.convert,
             source)
 
-        # For DOCX files, we need to handle the case where num_pages() returns 0
+        # Export to markdown using the unit separator between pages
         markdown = await asyncio.to_thread(
             result.document.export_to_markdown,
             page_break_placeholder=self.unit_sep
