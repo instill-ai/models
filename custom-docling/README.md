@@ -14,7 +14,7 @@ To ensure smooth integration, please refer to the compatibility matrix below. It
 
 | Model Version | Instill-Core Version | Python-SDK Version |
 | ------------- | -------------------- | ------------------ |
-| v0.1.0        | >v0.39.0-beta        | >0.16.1            |
+| v0.1.3        | v0.50.4-beta         | 0.17.0             |
 
 > **Note:** Always ensure that you are using compatible versions to avoid unexpected issues.
 
@@ -35,7 +35,7 @@ pip install instill-sdk=={version}
 To obtain the model weights run the following commands:
 
 ```bash
-pip install docling
+pip install docling==2.31.0
 docling-tools models download
 cp -r $HOME/.cache/docling/models $HOME/path/to/model/version/docling-models
 ```
@@ -47,12 +47,12 @@ where `$HOME/path/to/model/version/docling-models` is in the same directory as t
 After you've built the model image, and before pushing the model onto any **Instill Core** instance, you can test if the model can be successfully run locally first, by running the following command:
 
 ```bash
-instill run admin/docling -t v0.1.0 -g -i '{"doc_content": <INSERT BASE64 STRING>}'
+instill run admin/docling:v0.1.0 -g -i '{"doc_content": <INSERT BASE64 STRING>}'
 ```
 
 For convenience, we have included a sample JSON payload containing a base64 encoded PDF file.
 ```bash
-instill run admin/docling -t v0.1.0 -g -i "$(cat sample_payload.json)"
+instill run admin/docling:v0.1.0 -g -i "$(cat sample_payload.json)"
 ```
 
 The input payload should strictly follow the the below format
