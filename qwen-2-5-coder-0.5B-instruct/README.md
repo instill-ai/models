@@ -1,4 +1,4 @@
-# Qwen2.5 Coder 32B Instruct GGUF
+# Qwen2.5 Coder 0.5B Instruct
 
 ## 📖 Introduction
 
@@ -12,9 +12,9 @@ Qwen2.5-Coder is the latest series of Code-Specific Qwen large language models (
 
 To ensure smooth integration, please refer to the compatibility matrix below. It outlines the compatible versions of the model, [`instill-core`](https://github.com/instill-ai/instill-core), and the [`python-sdk`](https://github.com/instill-ai/python-sdk).
 
-| Model Version | Instill-Core Version | Python-SDK Version |
-| ------------- | -------------------- | ------------------ |
-| v0.1.0        | >v0.46.0-beta        | >0.16.0            |
+| Instill-Core Version | Python-SDK Version |
+| -------------------- | ------------------ |
+| >v0.46.0             | >=0.18.0           |
 
 > **Note:** Always ensure that you are using compatible versions to avoid unexpected issues.
 
@@ -22,7 +22,7 @@ To ensure smooth integration, please refer to the compatibility matrix below. It
 
 Follow [this](../README.md) guide to get your custom model up and running! But before you do that, please read through the following sections to have all the necessary files ready.
 
-#### Install Python SDK
+### Install Python SDK
 
 Install the compatible [`python-sdk`](https://github.com/instill-ai/python-sdk) version according to the compatibility matrix:
 
@@ -30,12 +30,26 @@ Install the compatible [`python-sdk`](https://github.com/instill-ai/python-sdk) 
 pip install instill-sdk=={version}
 ```
 
-#### Get model weights
+### Get model weights
 
 To download the fine-tuned model weights, please execute the following command:
 
-```bash
-huggingface-cli download Qwen/Qwen2.5-Coder-32B-Instruct-GGUF --include "qwen2.5-coder-32b-instruct-q4_0.gguf" --local-dir ./
+#### mlc-llm
+
+```shell
+huggingface-cli download mlc-ai/Qwen2.5-Coder-0.5B-Instruct-q0f16-MLC --local-dir ./mlc-llm/Qwen2.5-Coder-0.5B-Instruct-q0f16-MLC
+```
+
+#### transformers
+
+```shell
+huggingface-cli download Qwen/Qwen2.5-Coder-0.5B-Instruct-AWQ --local-dir ./transformers/Qwen2.5-Coder-0.5B-Instruct-AWQ
+```
+
+#### vllm
+
+```shell
+huggingface-cli download Qwen/Qwen2.5-Coder-0.5B --local-dir ./vllm/Qwen2.5-Coder-0.5B
 ```
 
 ## Test model image
@@ -43,7 +57,7 @@ huggingface-cli download Qwen/Qwen2.5-Coder-32B-Instruct-GGUF --include "qwen2.5
 After you've built the model image, and before pushing the model onto any **Instill Core** instance, you can test if the model can be successfully run locally first, by running the following command:
 
 ```bash
-instill run admin/qwen-2-5-coder-32b-instruct -g -i '{"prompt": "describe python in one line"}'
+instill run admin/qwen-2-5-coder-0.5b-instruct -g -i '{"prompt": "describe python in one line"}'
 ```
 
 The input payload should strictly follow the the below format
@@ -71,12 +85,6 @@ A successful response will return a similar output to that shown below.
                                     'role': 'assistant'}}]}}]
 2024-11-29 06:51:33,384.384 INFO     [Instill] Done
 ```
-
-Here is the list of flags supported by `instill run` command
-
-- -t, --tag: tag for the model image, default to `latest`
-- -g, --gpu: to pass through GPU from host into container or not, depends on if `gpu` is enabled in the config.
-- -i, --input: input in json format
 
 ---
 
