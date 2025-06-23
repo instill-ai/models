@@ -2,6 +2,14 @@
 
 Welcome to our Model Repository! This repository houses a collection of machine learning models designed to perform various AI tasks. They are all prepared and ready to be seamlessly served on [**Instill Core**](https://www.instill-ai.dev/docs/core/introduction) via our MLOps/LLMOps platform [**Instill Model**](https://www.instill-ai.dev/docs/model/introduction).
 
+## Supported LLM Serving Runtime
+
+|                           Runtime                           | AMD64 CPU | ARM64 CPU | AMD64 GPU (CUDA) |
+| :---------------------------------------------------------: | :-------: | :-------: | :--------------: |
+|        [vLLM](https://github.com/vllm-project/vllm)         |     ✅     |     ✅     |        ✅         |
+|        [MLC LLM](https://github.com/mlc-ai/mlc-llm)         |     ✅     |     ✅     |        ✅         |
+| [Transformers](https://github.com/huggingface/transformers) |     ✅     |     ✅     |        ✅         |
+
 ## Available Models
 
 We have a diverse set of models, each optimized for different AI tasks. Please refer to the table below to gain more insight into a specific model, including its configuration, implementation details, and usage. Feel free to check out the README files in the respective model folders:
@@ -25,7 +33,7 @@ We have a diverse set of models, each optimized for different AI tasks. Please r
 | [zephyr-7b](./zephyr-7b/README.md)                                         | Chat                  | zephyr-7b is a series of language models that are trained to act as helpful assistants.                                                                                                                              |
 | [gemma-2-27b-it](./gemma-2-27b-it/README.md)                               | Chat                  | Gemma is a family of lightweight, state-of-the-art open models from Google.                                                                                                                                          |
 | [qwen-2-5-72b-instruct](./qwen-2-5-72b-instruct/README.md)                 | Chat                  | Qwen2.5 is the latest series of Qwen large language models.                                                                                                                                                          |
-| [qwen-2-5-coder-32b-instructt](./qwen-2-5-coder-32b-instruct/README.md)    | Chat                  | Qwen2.5-Coder is the latest series of Code-Specific Qwen large language models (formerly known as CodeQwen).                                                                                                         |
+| [qwen-2-5-coder-0.5b-instruct](./qwen-2-5-coder-0.5b-instruct/README.md)   | Chat                  | Qwen2.5-Coder is the latest series of Code-Specific Qwen large language models (formerly known as CodeQwen).                                                                                                         |
 | [llama-3-2-3b-instruct](./llama-3-2-3b-instruct/README.md)                 | Chat                  | The Llama 3.2 collection of multilingual large language models (LLMs) is a collection of pretrained and instruction-tuned generative models in 1B and 3B sizes (text in/text out).                                   |
 | [llama-3-2-11b-vision-instruct](./llama-3-2-11b-vision-instruct/README.md) | Chat                  | The Llama 3.2-Vision collection of multimodal large language models (LLMs) is a collection of pretrained and instruction-tuned image reasoning generative models in 11B and 90B sizes (text + images in / text out). |
 | [llama-3-2-90b-vision-instruct](./llama-3-2-90b-vision-instruct/README.md) | Chat                  | The Llama 3.2-Vision collection of multimodal large language models (LLMs) is a collection of pretrained and instruction-tuned image reasoning generative models in 11B and 90B sizes (text + images in / text out). |

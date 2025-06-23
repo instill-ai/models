@@ -1,0 +1,3 @@
+build:
+  gpu: false
+  llm_runtime: "transformers"
