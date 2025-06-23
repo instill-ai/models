@@ -12,11 +12,9 @@
 
 To ensure smooth integration, please refer to the compatibility matrix below. It outlines the compatible versions of the model, [`instill-core`](https://github.com/instill-ai/instill-core), and the [`python-sdk`](https://github.com/instill-ai/python-sdk).
 
-| Model Version | Instill-Core Version | Python-SDK Version |
-| ------------- | -------------------- | ------------------ |
-| v0.0.1        | <=v0.39.0-beta       | <=0.11.0, >=0.10.2 |
-| v0.1.0        | >v0.39.0-beta        | >0.11.0            |
-| v0.2.0        | >v0.39.0-beta        | >0.16.0            |
+| Instill Core Version | Python SDK Version |
+| -------------------- | ------------------ |
+| >= v0.51.0           | >= v0.18.0         |
 
 > **Note:** Always ensure that you are using compatible versions to avoid unexpected issues.
 

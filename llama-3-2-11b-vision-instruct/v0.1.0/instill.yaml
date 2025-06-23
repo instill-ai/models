@@ -1,17 +1,4 @@
 build:
   # set to true if your model requires GPU
   gpu: true
-
-  # python version, currently only support 3.11
-  python_version: "3.11"
-
-  # cuda version if `gpu` is set to true
-  # support 11.5, 11.6 ,11.7 ,11.7 ,12.1
-  cuda_version: "12.1"
-
-  # a list of python packages in the format of {package-name}=={version}
-  python_packages:
-    - torch==2.5.1
-    - torchvision==0.20.1
-    - transformers==4.45.2
-    - accelerate==1.1.1
+  llm_runtime: "transformers"

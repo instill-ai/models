@@ -12,9 +12,9 @@ Qwen2.5-Coder is the latest series of Code-Specific Qwen large language models (
 
 To ensure smooth integration, please refer to the compatibility matrix below. It outlines the compatible versions of the model, [`instill-core`](https://github.com/instill-ai/instill-core), and the [`python-sdk`](https://github.com/instill-ai/python-sdk).
 
-| Instill-Core Version | Python-SDK Version |
+| Instill Core Version | Python SDK Version |
 | -------------------- | ------------------ |
-| >v0.46.0             | >=0.18.0           |
+| >= v0.51.0           | >= v0.18.0         |
 
 > **Note:** Always ensure that you are using compatible versions to avoid unexpected issues.
 

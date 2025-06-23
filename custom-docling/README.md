@@ -12,9 +12,9 @@ This is a custom model using `TASK_CUSTOM` to parse documents.
 
 To ensure smooth integration, please refer to the compatibility matrix below. It outlines the compatible versions of the model, [`instill-core`](https://github.com/instill-ai/instill-core), and the [`python-sdk`](https://github.com/instill-ai/python-sdk).
 
-| Model Version | Instill-Core Version | Python-SDK Version |
-| ------------- | -------------------- | ------------------ |
-| v0.1.3        | v0.50.4-beta         | 0.17.0             |
+| Instill Core Version | Python SDK Version |
+| -------------------- | ------------------ |
+| >= v0.51.0           | >= v0.18.0         |
 
 > **Note:** Always ensure that you are using compatible versions to avoid unexpected issues.
 

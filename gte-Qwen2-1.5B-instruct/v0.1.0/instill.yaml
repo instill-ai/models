@@ -1,8 +1,5 @@
 build:
   gpu: true
-  python_version: "3.11"
+  llm_runtime: "transformers"
   python_packages:
-    - torch==2.4.0
-    - transformers==4.44.0
     - sentence_transformers==3.0.1
-    - flash_attn==2.6.3

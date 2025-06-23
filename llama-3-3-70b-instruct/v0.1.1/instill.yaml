@@ -1,6 +1,5 @@
 build:
   gpu: true
-  python_version: "3.11" # support only 3.11
+  llm_runtime: "vllm"
   python_packages:
-    - vllm==0.8.3
     - bitsandbytes==0.45.0
