@@ -1,7 +1,5 @@
 build:
   gpu: true
-  python_version: "3.11" # support only 3.11
+  llm_runtime: "transformers"
   python_packages:
-    - torch==2.4.0
-    - transformers==4.44.0
     - diffusers==0.30.0

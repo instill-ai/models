@@ -2,7 +2,12 @@
 
 Welcome to our Model Repository! This repository houses a collection of machine learning models designed to perform various AI tasks. They are all prepared and ready to be seamlessly served on [**Instill Core**](https://www.instill-ai.dev/docs/core/introduction) via our MLOps/LLMOps platform [**Instill Model**](https://www.instill-ai.dev/docs/model/introduction).
 
-## Supported LLM Serving Runtime
+## Requirements
+
+- [Instill Core](https://www.instill-ai.dev/docs/core/introduction)
+- [Instill Python SDK](https://github.com/instill-ai/python-sdk)
+
+## Supported LLM Serving Runtimes
 
 |                           Runtime                           | AMD64 CPU | ARM64 CPU | AMD64 GPU (CUDA) |
 | :---------------------------------------------------------: | :-------: | :-------: | :--------------: |
