@@ -1,0 +1,3 @@
+build:
+  gpu: true
+  llm_runtime: "vllm"
