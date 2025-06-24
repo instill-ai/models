@@ -5,6 +5,7 @@
 [DeepSeek-R1-Distill-Qwen-1.5B](https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B) is a compact yet powerful language model distilled from DeepSeek-R1, specifically designed for reasoning tasks. This model is based on the Qwen2.5-Math-1.5B architecture and has been fine-tuned using knowledge distilled from the larger DeepSeek-R1 model.
 
 Key features:
+
 - Built on Qwen2.5-Math-1.5B as the base model
 - Distilled from DeepSeek-R1 using reasoning-focused training data
 - Optimized for mathematical reasoning, coding, and general problem-solving tasks

@@ -11,7 +11,7 @@ from instill.helpers import (
 @instill_deployment
 class DeepSeekR1DistillQwen7B:
     def __init__(self):
-        self.model = "DeepSeek-R1-Distill-Qwen-14B-q4f32_1-MLC"
+        self.model = "DeepSeek-R1-Distill-Qwen-7B-q4f16_1-MLC"
         self.engine = AsyncMLCEngine(self.model)
 
     async def __call__(self, request):
@@ -52,6 +52,4 @@ class DeepSeekR1DistillQwen7B:
         )
 
 
-entrypoint = InstillDeployable(
-    DeepSeekR1DistillQwen7B
-).get_deployment_handle()
+entrypoint = InstillDeployable(DeepSeekR1DistillQwen7B).get_deployment_handle()
