@@ -1,0 +1,7 @@
+build:
+  gpu: true
+  llm_runtime: "llamacpp"
+  python_packages:
+    - huggingface_hub
+    - hf_transfer
+    - openai
