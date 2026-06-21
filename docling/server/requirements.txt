@@ -1,0 +1,18 @@
+# granite-docling MLX host server — validated stack (Apple Silicon / Metal).
+#
+# Pin rationale (important): granite-docling's preprocessor_config.json declares the SLOW
+# Idefics3ImageProcessor. transformers 5.x dropped slow image processors from the auto-map
+# (fast-only, and the fast variant needs torch+torchvision ~GB). The latest mlx-vlm pulls
+# transformers 5.x — so we pin mlx-vlm 0.3.3 + transformers <5, which keeps the slow processor
+# and stays TORCH-FREE (pure MLX + numpy). Measured: latest mlx-vlm is not faster, only heavier.
+mlx-vlm==0.3.3
+transformers>=4.53,<5
+docling-core
+huggingface_hub
+pillow
+PyMuPDF          # PDF -> page images (fitz)
+fastapi
+uvicorn[standard]
+
+# Ray Serve front (serve_app.py) — multi-replica, page-parallel. Host-native arm64 (Metal).
+ray[serve]
