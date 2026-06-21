@@ -1,0 +1,19 @@
+{
+  "epoch": 620,
+  "epochs_total": 800,
+  "valid_now": 0.48324013048398906,
+  "test_now": 0.3792009324613093,
+  "best_valid": 0.5212036482258172,
+  "best_test": 0.4090742299639535,
+  "best_epoch": 440,
+  "elapsed_s": 21105.0,
+  "device": "cpu",
+  "config": {
+    "K": 2,
+    "dim": 128,
+    "layers": 2,
+    "dropout": 0.5,
+    "lr": 0.001,
+    "year": 2010
+  }
+}
