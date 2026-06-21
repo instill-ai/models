@@ -106,3 +106,17 @@ class DoclingIngress:
 
 # `serve run serve_app:app`
 app = DoclingIngress.bind(DoclingModel.bind())
+
+
+if __name__ == "__main__":
+    # Launchable as `python serve_app.py` so buckle supervises the Ray Serve front the same way it
+    # supervises the FastAPI server — one launchd process, /health probe, the shared-server port.
+    # This is how local dev gets prod-equivalent page-parallel serving (replicas), not just prod.
+    import os
+    import time
+    port = int(os.environ.get("SHUBO_DOCLING_PORT", os.environ.get("PORT", "8088")))
+    serve.start(http_options={"host": "0.0.0.0", "port": port})
+    serve.run(app, route_prefix="/")
+    print(f"granite-docling Ray Serve up on :{port} (replicas {MIN_REPLICAS}..{MAX_REPLICAS})", flush=True)
+    while True:  # block so launchd keeps supervising the Ray head + replicas
+        time.sleep(3600)
