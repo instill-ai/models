@@ -1,0 +1,31 @@
+{
+  "in_dim": 19,
+  "feats": [
+    "cn",
+    "aa",
+    "ra",
+    "log_pa",
+    "jaccard",
+    "wcn",
+    "cn_deg_sum",
+    "cn_deg_min",
+    "deg_i",
+    "deg_j",
+    "c11",
+    "c12",
+    "c21",
+    "c22",
+    "i22",
+    "lcard2_i",
+    "lcard2_j",
+    "emb_cos",
+    "emb_dot"
+  ],
+  "sketches": true,
+  "node_feat": true,
+  "K": 128,
+  "hops": 2,
+  "hits@50": 0.6165798633603676,
+  "pretrain": "ogbn-arxiv",
+  "model": "BUDDY-style inductive (ELPH sketches + structural + node-emb) \u2192 MLX MLP"
+}

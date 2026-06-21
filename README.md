@@ -1,93 +1,78 @@
-# Instill AI Models
+# Shubo Custom Models
 
-Welcome to our Model Repository! This repository houses a collection of machine learning models designed to perform various AI tasks. They are all prepared and ready to be seamlessly served on [**Instill Core**](https://www.instill-ai.dev/docs/core/introduction) via our MLOps/LLMOps platform [**Instill Model**](https://www.instill-ai.dev/docs/model/introduction).
+This is **Shubo's custom model repository** — the single home for the models Shubo
+serves and the model research it owns. It holds two kinds of thing:
 
-## Requirements
+1. **Served models** — model definitions + serving code that **`model-backend`** deploys and that
+   the rest of the stack triggers (chat / VLM / embedding / detection models, and the
+   **`docling`** document parser that powers structure-aware RAG ingestion).
+2. **Model research projects** — Shubo's own MLX/graph work that produces or evaluates models
+   (`linkpred-mlx`, `gidn`, `plnlp` — Apple-Silicon link-prediction experiments).
 
-- [Instill Core](https://www.instill-ai.dev/docs/core/introduction)
-- [Instill Python SDK](https://github.com/instill-ai/python-sdk)
+It is part of the **Shubo workspace** and is **managed by `buckle`**: `buckle init` clones it as a
+sibling of `backend`/`frontend`/`deploy`, and provisions the shared agent context
+(`AGENTS.md`/`CLAUDE.md`/`.claude/skills`) into it. It is **not** a sandbox service tier — it does not
+boot in `buckle sandbox` and is not worktreed per task (it sits alongside `deploy`/`cloud`: present and
+agent-aware, not part of the running stack). See `../buckle` and the workspace `../AGENTS.md`.
 
-## Supported LLM Serving Runtimes
+## Layout
 
-|                           Runtime                           | AMD64 CPU | ARM64 CPU | AMD64 GPU (CUDA) |
-| :---------------------------------------------------------: | :-------: | :-------: | :--------------: |
-|        [vLLM](https://github.com/vllm-project/vllm)         |     ✅     |     ✅     |        ✅         |
-|        [MLC LLM](https://github.com/mlc-ai/mlc-llm)         |     ✅     |     ✅     |        ✅         |
-| [Transformers](https://github.com/huggingface/transformers) |     ✅     |     ✅     |        ✅         |
+```
+models/
+├── docling/               # the docling document parser served by model-backend (v0.1.x);
+│                          #   emits DoclingDocument structure for structure-aware RAG (see below)
+├── custom/                # other custom served-model scaffolding
+├── <served-model>/        # one dir per served model (LLM / VLM / embedding / detection),
+│                          #   each with its own README + versioned vX.Y.Z/ folders
+│                          #   e.g. qwen-2-5-vl-7b-instruct, gte-Qwen2-1.5B-instruct, yolov7, …
+├── linkpred-mlx/          # MLX link-prediction (ogbl-collab / arxiv-semantic) — research
+├── gidn/                  # Graph Inception Diffusion Networks link-prediction — research
+└── plnlp/                 # Pairwise Learning for Neural Link Prediction — research
+```
 
-## Available Models
+Each **served model** folder carries its own `README.md` (config, weights, build/push steps) and one
+or more `vX.Y.Z/` version folders. Open the folder README for that model's specifics.
 
-We have a diverse set of models, each optimized for different AI tasks. Please refer to the table below to gain more insight into a specific model, including its configuration, implementation details, and usage. Feel free to check out the README files in the respective model folders:
+## Serving model
 
-| Model Name                                                                 | Task Type             | Description                                                                                                                                                                                                          |
-| -------------------------------------------------------------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [deepseek-r1-distill-qwen-1.5b](./deepseek-r1-distill-qwen-1.5b/README.md) | Chat                  | DeepSeek-R1-Distill-Qwen-1.5B is a compact yet powerful language model distilled from DeepSeek-R1, specifically designed for reasoning tasks.                                                                        |
-| [phi-3.5-vision-instruct](./phi-3-5-vision/README.md)                      | Chat                  | Phi-3.5-vision is a lightweight, state-of-the-art open multimodal model.                                                                                                                                             |
-| [gte-Qwen2-1.5B-instruct](./gte-Qwen2-1.5B-instruct/README.md)             | Embedding             | gte-Qwen2-1.5B-instruct is the latest model in the gte (General Text Embedding) model family.                                                                                                                        |
-| [jina-clip-v1](./jina-clip-v1/README.md)                                   | Embedding             | jina-clip-v1 is a state-of-the-art English multimodal (text-image) embedding model.                                                                                                                                  |
-| [llama-2-7b-chat](./llama-2-7b-chat/README.md)                             | Chat                  | llama-2-7b-chat is optimized for dialogue use cases.                                                                                                                                                                 |
-| [llama-3-8b-instruct](./llama-3-8b-instruct/README.md)                     | Chat                  | llama-3-8b-instruct is an instruction tuned generative text model.                                                                                                                                                   |
-| [llamacode-7b](./llamacode-7b/README.md)                                   | Completion            | llamacode-7b is designed for general code synthesis and understanding.                                                                                                                                               |
-| [llava-1-6-13b](./llava-1-6-13b/README.md)                                 | Chat                  | llava-1-6-13b is an open-source chatbot trained by fine-tuning LLM on multimodal instruction-following data.                                                                                                         |
-| [mobilenetv2](./mobilenetv2/README.md)                                     | Classification        | mobilenetv2 is a lightweight 53-layer deep CNN model with a smaller number of parameters and an input size of 224×224.                                                                                               |
-| [stable-diffusion-xl](./stable-diffusion-xl/README.md)                     | Text to Image         | stable-diffusion-xl is a a latent diffusion model for text-to-image synthesis.                                                                                                                                       |
-| [stella-en-1.5B-v5](./stella-en-1.5B-v5/README.md)                         | Embedding             | stella-en-1.5B-v5 is trained based on Alibaba-NLP/gte-large-en-v1.5 and Alibaba-NLP/gte-Qwen2-1.5B-instruct.                                                                                                         |
-| [tinyllama](./tinyllama/README.md)                                         | Chat                  | tinyllama is a chat model finetuned on top of TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T.                                                                                                                   |
-| [yolov7](./yolov7/README.md)                                               | Object Detection      | yolov7 is a state-of-the-art real-time object detector.                                                                                                                                                              |
-| [yolov7-stomata](./yolov7-stomata/README.md)                               | Instance Segmentation | yolov7-stomata is designed for stomata detection and segmentation.                                                                                                                                                   |
-| [zephyr-7b](./zephyr-7b/README.md)                                         | Chat                  | zephyr-7b is a series of language models that are trained to act as helpful assistants.                                                                                                                              |
-| [gemma-2-27b-it](./gemma-2-27b-it/README.md)                               | Chat                  | Gemma is a family of lightweight, state-of-the-art open models from Google.                                                                                                                                          |
-| [qwen-2-5-72b-instruct](./qwen-2-5-72b-instruct/README.md)                 | Chat                  | Qwen2.5 is the latest series of Qwen large language models.                                                                                                                                                          |
-| [qwen-2-5-coder-0.5b-instruct](./qwen-2-5-coder-0.5b-instruct/README.md)   | Chat                  | Qwen2.5-Coder is the latest series of Code-Specific Qwen large language models (formerly known as CodeQwen).                                                                                                         |
-| [llama-3-2-3b-instruct](./llama-3-2-3b-instruct/README.md)                 | Chat                  | The Llama 3.2 collection of multilingual large language models (LLMs) is a collection of pretrained and instruction-tuned generative models in 1B and 3B sizes (text in/text out).                                   |
-| [llama-3-2-11b-vision-instruct](./llama-3-2-11b-vision-instruct/README.md) | Chat                  | The Llama 3.2-Vision collection of multimodal large language models (LLMs) is a collection of pretrained and instruction-tuned image reasoning generative models in 11B and 90B sizes (text + images in / text out). |
-| [llama-3-2-90b-vision-instruct](./llama-3-2-90b-vision-instruct/README.md) | Chat                  | The Llama 3.2-Vision collection of multimodal large language models (LLMs) is a collection of pretrained and instruction-tuned image reasoning generative models in 11B and 90B sizes (text + images in / text out). |
-| [functionary-medium-v3.2](./functionary-medium-v3.2/README.md)             | Chat                  | Functionary is a language model that can interpret and execute functions/plugins.                                                                                                                                    |
-| [yi-vl-6b](./yi-vl-6b/README.md)                                           | Chat                  | Yi Vision Language (Yi-VL) model is the open-source, multimodal version of the Yi Large Language Model (LLM) series, enabling content comprehension, recognition, and multi-round conversations about images.        |
-| [stable-diffusion-3.5-large](./stable-diffusion-3.5-large/README.md)       | Text to Image         | Stable Diffusion 3.5 Large is a Multimodal Diffusion Transformer (MMDiT) text-to-image model.                                                                                                                        |
-| [qwen-2-vl-72b-instruct](./qwen-2-vl-72b-instruct/README.md)               | Chat                  | Qwen2-VL multimodal model.                                                                                                                                                                                           |
-| [llama-3-3-70b-instruct](./llama-3-3-70b-instruct/README.md)               | Chat                  | The Meta Llama 3.3 multilingual large language model (LLM) is a pretrained and instruction tuned generative model in 70B (text in/text out).                                                                         |
-| [qwen-2-5-vl-3b-instruct](./qwen-2-5-vl-3b-instruct/README.md)             | Chat                  | Qwen2.5-VL is the latest addition to the Qwen family, featuring enhanced visual understanding, agentic capabilities, visual localization, and structured output generation.                                          |
-| [qwen-2-5-vl-7b-instruct](./qwen-2-5-vl-7b-instruct/README.md)             | Chat                  | Qwen2.5-VL is the latest addition to the Qwen family, featuring enhanced visual understanding, agentic capabilities, visual localization, and structured output generation.                                          |
+Served models run on **`model-backend`** (the Ray-Serve plane historically; **Ray is disabled in
+production today** — see `backend/services/model`). Because the production fleet is **Apple-Silicon
+MacBook Pro** k3s nodes, GPU-accelerated inference does **not** run inside the Linux containers (no
+Metal passthrough). Instead the established pattern is **host-managed model servers**: an MLX/Metal
+FastAPI process runs on the macOS host (supervised by `buckle` via `launchd`), and `model-backend`
+routes to it through the `staticruntime` / `runtime_ref` seam (the same way `gemma`/`mlx-vlm`/ASR are
+served today). See `buckle/scripts/sandbox/qwen3-asr-server.py` for the host-server template and
+`backend/services/model/pkg/llm/runtime/` for the routing seam.
 
-## Getting Started
+### Apple-Silicon (MLX) docling hosting
 
-We leverage Instill Core to provide a seamless experience for serving models. Follow the steps below to quickly get started:
+`docling` is the document parser behind structure-aware RAG (it must emit the
+`DoclingDocument` `export_to_dict()` tree the backend consumes — see
+`backend/docs/artifact/m7-w1b-producer-wiring.md`). To get Metal acceleration on the Apple-Silicon
+fleet, docling is hosted as an **MLX host server** (mirroring the ASR/VLM host servers) rather than a
+Ray container. The design — host server, `buckle` role registration, and the two routing options
+(redirect the parsing-router `model_url`, vs. a model-backend external-utility runtime) — lives in
+[`docling/docs/mlx-host-serving.md`](./docling/docs/mlx-host-serving.md).
 
-### 1. Instill Core or Instill Cloud
+## Supported serving runtimes (LLM/VLM)
 
-#### Self-host 🔮 Instill Core
+|                           Runtime                           | AMD64 CPU | ARM64 CPU | AMD64 GPU (CUDA) | Apple GPU (Metal/MLX) |
+| :---------------------------------------------------------: | :-------: | :-------: | :--------------: | :-------------------: |
+|        [vLLM](https://github.com/vllm-project/vllm)         |     ✅     |     ✅     |        ✅         |          —            |
+|     [mlx-vlm](https://github.com/Blaizzy/mlx-vlm)           |     —     |     —     |        —         |          ✅           |
+| [Transformers](https://github.com/huggingface/transformers) |     ✅     |     ✅     |        ✅         |        ✅ (MPS)        |
+| [llama.cpp](https://github.com/ggml-org/llama.cpp)          |     ✅     |     ✅     |        ✅         |          ✅           |
 
-Follow [this section](https://www.instill-ai.dev/docs/quickstart#-instill-core) of our quick start guide to get it up and running with self-hosting **Instill Core** on a local or remote instance.
+On the Apple-Silicon fleet, **MLX/Metal runtimes are the accelerated path** (host-managed, as above).
 
-### 2. Create a model namespace
+## Research projects
 
-To create a model namespace, follow the steps on the [Create Namespace](https://www.instill-ai.dev/docs/model/create/namespace) page.
+- **`linkpred-mlx`** — Apple-Silicon (MLX) link prediction on `ogbl-collab` / arxiv-semantic graphs.
+- **`gidn`** — Graph Inception Diffusion Networks for link prediction.
+- **`plnlp`** — Pairwise Learning for Neural Link Prediction.
 
-### 3. Prepare your model
+These are reproducible experiments (data + scripts + logs), not served models; they feed model design.
 
-Find the model you want to serve and download the desired version folder. Also, make sure to check out the particular model folder README to obtain other necessary files, model weights or perform any additional required steps.
+## License
 
-### 4. Build your model
-
-Follow the steps on the [Build Model Image](https://www.instill-ai.dev/docs/model/create/build) page, and remember to install the `python-sdk` version according to the compatibility matrix in each model's README.
-
-### 5. Push and deploy your model
-
-Follow the steps on the [Push Model Image](https://www.instill-ai.dev/docs/model/create/push) page to deploy the model to your choice of **Instill Core** or **Instill Cloud**.
-
-## Implement your own custom model
-
-Follow the steps on the [Prepare Model](https://www.instill-ai.dev/docs/model/create/prepare) page to see how to implement your own custom model that can be served on **Instill Core** and **Instill Cloud**! You can also checkout the [step-by-step tutorial](https://www.instill-ai.dev/blog/model-serving-on-instill-core) which walks you through the process of serving your own custom model on **Instill Core**.
-
-## 🤝 Contributing
-
-We welcome contributions! Please see our [CONTRIBUTING.md](https://github.com/instill-ai/instill-core/blob/main/.github/CONTRIBUTING.md) file for more details on how to get started.
-
-## 🛠 Troubleshooting
-
-If you encounter any issues, please check our [Documentation](https://www.instill-ai.dev/docs/model/introduction) or open an [issue](https://github.com/instill-ai/instill-core/issues) on GitHub.
-
-## 📜 License
-
-This project is licensed under the MIT License - see the [LICENSE](https://github.com/instill-ai/instill-core/blob/main/LICENSE) file for details.
+MIT — see the workspace `LICENSE`.

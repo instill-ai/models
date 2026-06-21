@@ -1,2 +1,5 @@
 # scripts
 *.sh
+# large research artifacts (reproducible via reproduce.sh / train.py — keep out of git)
+*.pt
+*.npz

@@ -1,0 +1,5 @@
+# GIDN reimplementation — runs on Apple-Silicon MPS or CPU (no torch_scatter/torch_sparse needed)
+torch>=2.1
+numpy>=1.26
+scipy>=1.11
+ogb>=1.3.6
