@@ -6,14 +6,27 @@ For multi-replica throughput use the Ray Serve front (`serve_app.py`) — same c
 Run:  uvicorn server:app --host 0.0.0.0 --port $PORT
 """
 import base64
+import re
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException
 from pydantic import BaseModel
 
 from granite_docling import GraniteDocling, render_pdf, decode_image, DEFAULT_MODEL, DEFAULT_PDF_DPI
 
 app = FastAPI(title="granite-docling-mlx", version="0.1.0")
 engine = GraniteDocling()
+
+_DATA_URI = re.compile(r"^data:(?P<mime>[^;,]*)(?:;base64)?,(?P<data>.*)$", re.DOTALL)
+
+
+def _images_from_doc(doc_content: str):
+    """A data-uri (or bare base64) document -> page images (PDF rendered, image decoded)."""
+    m = _DATA_URI.match(doc_content)
+    raw = base64.b64decode(m.group("data") if m else doc_content)
+    mime = (m.group("mime") if m else "") or ""
+    if "pdf" in mime.lower() or raw[:5] == b"%PDF-":
+        return render_pdf(raw, DEFAULT_PDF_DPI)
+    return [decode_image(raw)]
 
 
 class ConvertRequest(BaseModel):
@@ -44,6 +57,27 @@ async def convert(req: ConvertRequest):
         return engine.convert(images)
     except Exception as exc:  # noqa: BLE001 — surface the failure to the caller
         raise HTTPException(status_code=500, detail=f"docling conversion failed: {exc}") from exc
+
+
+@app.post("/v1alpha/namespaces/{namespace}/models/{model}/versions/{version}/trigger")
+async def trigger(namespace: str, model: str, version: str, body: dict = Body(...)):
+    """model-backend-trigger-compatible drop-in: the parsing-router's `docling` step posts
+    {taskInputs:[{data:{doc_content:<data-uri>}}]} and reads body.taskOutputs[0].data. Pointing the
+    step's endpoint at this server makes it a drop-in for the served `models/docling` model — the
+    response data carries markdown_pages + structured_document, exactly what routedConvertResultParser
+    consumes. (Async for the same MLX-thread reason as /convert.)"""
+    try:
+        doc_content = body["taskInputs"][0]["data"]["doc_content"]
+    except (KeyError, IndexError, TypeError):
+        raise HTTPException(status_code=400, detail="expected taskInputs[0].data.doc_content (data-uri)")
+    images = _images_from_doc(doc_content)
+    if not images:
+        raise HTTPException(status_code=400, detail="no pages to convert")
+    try:
+        data = engine.convert(images)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"docling conversion failed: {exc}") from exc
+    return {"taskOutputs": [{"data": data}]}
 
 
 @app.on_event("startup")
