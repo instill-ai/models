@@ -26,8 +26,12 @@ def health():
     return {"status": "ok", "model": DEFAULT_MODEL, "loaded": engine.loaded}
 
 
+# NOTE: async so the handler runs on the event-loop thread — the SAME thread that loads the MLX
+# model (startup) — because MLX's Metal stream is thread-local (a threadpool worker, which FastAPI
+# would use for a sync `def`, raises "no Stream(gpu, 0)"). The generate blocks this single-process
+# server for ~2.3s/page; for concurrent throughput use the Ray Serve front (serve_app.py).
 @app.post("/convert")
-def convert(req: ConvertRequest):
+async def convert(req: ConvertRequest):
     if req.pdf_b64:
         images = render_pdf(base64.b64decode(req.pdf_b64), DEFAULT_PDF_DPI)
     elif req.image_b64:
@@ -43,7 +47,16 @@ def convert(req: ConvertRequest):
 
 
 @app.on_event("startup")
-def _warm():
+async def _warm():
     import os
     if os.environ.get("SHUBO_DOCLING_EAGER_LOAD", "true").lower() == "true":
-        engine.load()
+        engine.load()  # on the event-loop thread, so /convert shares the MLX stream
+
+
+if __name__ == "__main__":
+    # Launchable as `python server.py` (how buckle supervises host model servers). Port comes from
+    # the shared-server slot (SHUBO_DOCLING_PORT). For multi-replica prod throughput use serve_app.py.
+    import os
+    import uvicorn
+    port = int(os.environ.get("SHUBO_DOCLING_PORT", os.environ.get("PORT", "8088")))
+    uvicorn.run(app, host="0.0.0.0", port=port)
