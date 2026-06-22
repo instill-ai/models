@@ -1,0 +1,12 @@
+[
+  {
+    "model": "mlx-community/Qwen3.6-35B-A3B-4bit",
+    "load_s": 8.03,
+    "classify_s": 7.3,
+    "classify_out": "Standard Document Operator",
+    "doctags_s": 8.97,
+    "doctags_tok": 161,
+    "doctags_tok_s": 17.9,
+    "peak_mem_gb": 22.79
+  }
+]
