@@ -6,9 +6,10 @@ For multi-replica throughput use the Ray Serve front (`serve_app.py`) — same c
 Run:  uvicorn server:app --host 0.0.0.0 --port $PORT
 """
 import base64
+import json
 import re
 
-from fastapi import Body, FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
 from granite_docling import GraniteDocling, render_pdf, decode_image, DEFAULT_MODEL, DEFAULT_PDF_DPI
@@ -60,15 +61,27 @@ async def convert(req: ConvertRequest):
 
 
 @app.post("/v1alpha/namespaces/{namespace}/models/{model}/versions/{version}/trigger")
-async def trigger(namespace: str, model: str, version: str, body: dict = Body(...)):
+async def trigger(namespace: str, model: str, version: str, request: Request):
     """model-backend-trigger-compatible drop-in: the parsing-router's `docling` step posts
     {taskInputs:[{data:{doc_content:<data-uri>}}]} and reads body.taskOutputs[0].data. Pointing the
     step's endpoint at this server makes it a drop-in for the served `models/docling` model — the
     response data carries markdown_pages + structured_document, exactly what routedConvertResultParser
-    consumes. (Async for the same MLX-thread reason as /convert.)"""
+    consumes. (Async for the same MLX-thread reason as /convert.)
+
+    Parse the body leniently (Request, not `dict = Body(...)`) so a quirk in the caller's body
+    encoding surfaces as a logged, actionable 400 rather than an opaque FastAPI 422."""
+    raw = await request.body()
+    try:
+        body = json.loads(raw)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[trigger] non-JSON body ({exc}); len={len(raw)} head={raw[:200]!r} tail={raw[-120:]!r}",
+              flush=True)
+        raise HTTPException(status_code=400, detail=f"invalid JSON body: {exc}") from exc
     try:
         doc_content = body["taskInputs"][0]["data"]["doc_content"]
     except (KeyError, IndexError, TypeError):
+        shape = list(body) if isinstance(body, dict) else type(body).__name__
+        print(f"[trigger] unexpected body shape: {shape}", flush=True)
         raise HTTPException(status_code=400, detail="expected taskInputs[0].data.doc_content (data-uri)")
     images = _images_from_doc(doc_content)
     if not images:
