@@ -90,6 +90,30 @@ async def trigger(namespace: str, model: str, version: str, request: Request):
         data = engine.convert(images)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"docling conversion failed: {exc}") from exc
+    # Strip pages[*].image from structured_document before JSON-stringifying it.
+    # The rasterized page images (~60 KB base64 PNG each) bloat the field to ~65 KB
+    # which exceeds pipeline proto/structpb limits → evidenceTreeBytes 0 in the
+    # artifact. Emit them as a sibling page_images list instead, consumed by
+    # routedConvertResultParser via the PageImages channel (independent of the tree).
+    if isinstance(data, dict) and isinstance(data.get("structured_document"), (dict, list)):
+        sd = data["structured_document"]
+        page_images = []
+        if isinstance(sd, dict) and isinstance(sd.get("pages"), dict):
+            pages_copy = {}
+            for page_no, page_info in sd["pages"].items():
+                img = page_info.get("image") if isinstance(page_info, dict) else None
+                if img and img.get("uri"):
+                    page_images.append({
+                        "page_no": int(page_no),
+                        "uri": img["uri"],
+                        "width": page_info.get("size", {}).get("width", 0),
+                        "height": page_info.get("size", {}).get("height", 0),
+                    })
+                pages_copy[page_no] = {k: v for k, v in page_info.items() if k != "image"}
+            sd = {**sd, "pages": pages_copy}
+        data = {**data, "structured_document": json.dumps(sd)}
+        if page_images:
+            data = {**data, "page_images": page_images}
     return {"taskOutputs": [{"data": data}]}
 
 
