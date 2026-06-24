@@ -95,8 +95,32 @@ async def trigger(namespace: str, model: str, version: str, request: Request):
     # deeply-nested object field on the way to the artifact (the flat markdown_pages
     # list survives, the DoclingDocument tree does not), so a string is what actually
     # reaches converted_file.evidence_tree for grounded chunking + the bbox overlay.
+    #
+    # Strip pages[*].image from structured_document before stringifying: the rasterized
+    # page images (base64 PNG, ~60 KB each) would bloat the string to ~65 KB and can
+    # exceed proto/pipeline size limits → evidenceTreeBytes stays 0 for complex docs.
+    # Expose them instead as a separate page_images list so routedConvertResultParser
+    # can persist them through the PageImages channel without touching the tree.
     if isinstance(data, dict) and isinstance(data.get("structured_document"), (dict, list)):
-        data = {**data, "structured_document": json.dumps(data["structured_document"])}
+        sd = data["structured_document"]
+        page_images = []
+        if isinstance(sd, dict) and isinstance(sd.get("pages"), dict):
+            pages_copy = {}
+            for page_no, page_info in sd["pages"].items():
+                img = page_info.get("image") if isinstance(page_info, dict) else None
+                if img and img.get("uri"):
+                    page_images.append({
+                        "page_no": int(page_no),
+                        "uri": img["uri"],
+                        "width": page_info.get("size", {}).get("width", 0),
+                        "height": page_info.get("size", {}).get("height", 0),
+                    })
+                # Keep the page entry but without the image blob
+                pages_copy[page_no] = {k: v for k, v in page_info.items() if k != "image"}
+            sd = {**sd, "pages": pages_copy}
+        data = {**data, "structured_document": json.dumps(sd)}
+        if page_images:
+            data = {**data, "page_images": page_images}
     return {"taskOutputs": [{"data": data}]}
 
 
