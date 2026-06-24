@@ -1,8 +1,12 @@
-# Serving docling on the Apple-Silicon fleet — MLX host serving (with Ray Serve)
+# Serving docling on the Apple-Silicon fleet — plain-MLX host serving
 
-> **Status: Design.** Targets the production fleet (Apple-Silicon MacBook Pro k3s nodes). Closes the
+> **Status: Built.** Targets the production fleet (Apple-Silicon MacBook Pro k3s nodes). Closes the
 > M7 W1b producer gap (`backend/docs/artifact/m7-w1b-producer-wiring.md` Part 1) *and* gives
-> Metal-accelerated document parsing. Owner: @pinglin.
+> Metal-accelerated document parsing. Served by a **plain-MLX FastAPI process** (`server/server.py`) —
+> one dedicated MLX process per model, **no Ray** (Ray is dropped, see "Why not …"). Page-level
+> throughput in prod comes from running **N independent processes** behind a Service, not from
+> in-process replicas. Consistent with the deploy repo's ADR 009
+> (`deploy/docs/adr/fleet/009-host-managed-mlx-model-serving.md`). Owner: @pinglin.
 
 ## The problem
 
@@ -14,9 +18,10 @@ Structure-aware RAG needs a **docling producer** that emits the canonical `Docli
    run in OrbStack Linux VMs with **no Metal passthrough**. Torch/EasyOCR docling inside a container is
    **CPU-bound** (multi-GB weights, slow). Acceleration is only available to a **native macOS host
    process** (MLX/Metal, unified memory).
-2. **Ray is off in prod today** (`deploy/k8s/apps/model/configmap.yaml` `CFG_RAY_ENABLED:false`), and
-   the legacy docling path is either the GPU-Ray container (inert) or the in-pipeline torch lib (CPU).
-   Neither is accelerated. Performance is a first-class requirement (ingestion throughput).
+2. **The single Metal GPU is the throughput bottleneck.** One Mac has one GPU, and every host model
+   server contends for it. So docling is its own **dedicated** process on its own port (the ADR 009
+   one-dedicated-server-per-model rule), and page throughput is bought by **process count**, not by
+   stacking replicas onto one GPU.
 
 ## The model — `granite-docling-258M-mlx` (the convergence)
 
@@ -54,65 +59,63 @@ So a single host server returns **both** `markdown_pages` (unchanged contract) *
 > docs fan out page-by-page (see throughput). This matches the visual-RAG direction (ADR-0021) — the
 > page image is already in hand.
 
-## Serving — Ray Serve on the macOS host
+## Serving — a plain-MLX FastAPI process on the macOS host
 
-Ray **does run natively on Apple Silicon** (single-node supported). The load-bearing rule:
+A single load-bearing rule shapes everything:
 
-> **A Ray Serve replica must be a *native arm64 host process* to use MLX/Metal.** Ray *inside* a Linux
-> container gets no Metal (same wall as everything else). So the Ray cluster + Serve replicas run on
-> the **macOS host** (launchd-supervised, exactly like today's `mlx-vlm`/ASR host servers in
-> `buckle/scripts/sandbox/`), and k8s routes to the Serve **HTTP ingress** on a host endpoint.
+> **The server must be a *native arm64 host process* to use MLX/Metal.** *Inside* a Linux container
+> there is no Metal (same wall as everything else). So the docling server runs on the **macOS host**
+> (launchd-supervised, exactly like the VLM/embeddings/ASR host servers in `buckle/scripts/sandbox/`),
+> and k8s routes to its **HTTP endpoint** on a host port.
 
-This is the same host-process pattern already proven for `gemma`/`mlx-vlm`/ASR, upgraded from a plain
-FastAPI server to **Ray Serve** for the performance features below.
+This is the same host-process pattern proven for the VLM/embeddings/ASR servers: **one dedicated MLX
+process per model**, a plain `mlx_vlm`-backed FastAPI app — **no Ray** (see "Why not …").
 
-### The deployment (batching + replicas)
+### The server (`server/server.py`)
 
-```python
-from ray import serve
-from fastapi import FastAPI, Request
+`server.py` loads `ibm-granite/granite-docling-258M-mlx` once and exposes three routes:
 
-api = FastAPI()
+- **`GET /health`** — `{status, model, loaded}`.
+- **`POST /convert`** — `{"pdf_b64": "…"}` or `{"image_b64": "…"}` → the DoclingDocument contract.
+- **`POST /v1alpha/namespaces/{ns}/models/{model}/versions/{version}/trigger`** — the
+  **model-backend-trigger-compatible** drop-in. It reads `taskInputs[0].data.doc_content` (a data-uri /
+  base64 doc) and returns `{"taskOutputs": [{"data": …}]}`, where `data` carries `markdown_pages` +
+  `structured_document` — exactly what the parsing-router's `routedConvertResultParser` consumes.
 
-@serve.deployment(
-    num_replicas="auto",                       # autoscale on load
-    autoscaling_config={"min_replicas": 1, "max_replicas": 4, "target_ongoing_requests": 4},
-    ray_actor_options={"num_cpus": 2},         # MLX uses the GPU via Metal, scheduled by count not CUDA
-)
-@serve.ingress(api)
-class DoclingMLX:
-    def __init__(self):
-        from mlx_vlm import load
-        self.model, self.processor, self.config = load("ibm-granite/granite-docling-258M-mlx")
+The `/trigger` path mirrors the served `models/docling` model's shape, so pointing the parsing-router
+step's endpoint at this server is a drop-in — callers don't change.
 
-    @serve.batch(max_batch_size=8, batch_wait_timeout_s=0.05)
-    async def _generate(self, pages: list) -> list:
-        # batch page-images through MLX where supported; else iterate (still 1 replica, warm weights)
-        ...
+> The handlers are `async` on purpose: MLX's Metal stream is **thread-local**, so generation must run
+> on the same event-loop thread that loaded the model (a sync `def` would dispatch to a threadpool
+> worker and raise `no Stream(gpu, 0)`; the model is warmed on the event-loop thread at startup). One
+> process therefore serves one page at a time (~2.3 s/page); for throughput, run **N processes** behind
+> a Service — not replicas in one process.
 
-    @api.post("/v1alpha/namespaces/instill-ai/models/docling/versions/v0.1.0/trigger")
-    async def trigger(self, req: Request):
-        # decode page image(s) -> _generate -> DocTags -> DoclingDocument
-        #   -> {"markdown_pages": [...], "structured_document": doc.export_to_dict()}
-        ...
-```
+### Throughput — N plain processes behind a round-robin Service
 
-The ingress path mirrors the existing `models/docling/.../trigger` shape so callers don't change.
+Generation is the floor, so per-page latency can't be driven below it on one GPU. Throughput comes
+from **page-level parallelism**: a multi-page doc fans out page-by-page, and the pages are spread
+across **N independent `server.py` processes** sitting behind a round-robin k8s **Service**. Each
+process is a dedicated MLX model on its own host port; the Service picks the boundary, the processes
+do the work. Size **N** by benchmarking per-page latency on the target Mac (and remember those
+processes share the one GPU with the host's other model servers).
+
+> One Metal GPU per Mac is the constraint that decides the shape. Running N processes is the way to
+> overlap page generation across pages; in-process replicas/autoscaling buy nothing on a single GPU,
+> which is exactly why Ray was dropped (see "Why not …").
 
 ### Performance levers (priority)
 
 | Lever | Why it helps | Notes |
 |---|---|---|
-| **Tiny model (631 MB)** | Many warm replicas fit in unified memory | vs multi-GB torch docling; cold-load once per replica |
+| **Tiny model (631 MB)** | Many warm processes fit in unified memory | vs multi-GB torch docling; cold-load once per process |
 | **MLX unified memory** | Zero CPU↔GPU copy on Apple Silicon | MLX is designed for this; the whole reason to host on the Mac |
-| **Multiple replicas / autoscale** | Page-level parallelism across a doc's pages | `num_replicas:"auto"`; small model → high replica density |
-| **`@serve.batch`** | Vectorized generation when MLX batching applies | VLM batch support is uneven — treat as opportunistic; replicas are the primary throughput lever |
+| **N processes behind a Service** | Page-level parallelism across a doc's pages | small model → high process density per Mac |
 | **`max_tokens` cap + `temp=0.0`** | Bounded, deterministic generation | DocTags are compact; cap per page |
-| **Page fan-out** | A 30-page PDF = 30 independent requests | Ray Serve handles routing/queueing across replicas |
+| **Page fan-out** | A 30-page PDF = 30 independent requests | the round-robin Service spreads them across processes |
 
-Primary throughput = **replicas × per-page latency**; batching is a secondary, opportunistic gain
-given current MLX-VLM batch maturity. Benchmark per-page latency on the target Mac before sizing
-`max_replicas`.
+Primary throughput = **processes × per-page latency**. Benchmark per-page latency on the target Mac
+before sizing **N**.
 
 ## Routing — how k8s reaches the host server
 
@@ -121,9 +124,9 @@ The backend already has the seam; pick the boundary:
 - **Option A — redirect the recipe `model_url` (smallest).** The parsing-router preset templates the
   docling endpoint off a `model_url` variable
   (`backend/services/artifact/pkg/pipeline/preset/pipelines/parsing-router/v1.2.0/recipe.yaml`). Point
-  it at the host Ray Serve ingress (a stable node IP / `ExternalName` Service / `host.docker.internal`
-  in sandbox). model-backend is bypassed for docling. Least code; loses model-backend's
-  registry/health/accounting.
+  it at the host server's `/trigger` endpoint (a stable node IP / `ExternalName` Service /
+  `host.docker.internal` in sandbox; the round-robin Service in prod). model-backend is bypassed for
+  docling. Least code; loses model-backend's registry/health/accounting.
 - **Option B — model-backend external-utility runtime (cleaner).** Register `docling` with a
   `runtime_ref` host endpoint via the existing `staticruntime` seam
   (`backend/services/model/pkg/llm/runtime/staticruntime/`), and add a `/trigger`-shaped adapter
@@ -136,45 +139,53 @@ migrate to **B** for a single managed front door once the host server is stable.
 ### Host-process supervision
 
 Reuse buckle's existing host-model supervisor (`buckle/scripts/sandbox/shared-model-servers.sh` +
-`start-local-models.sh`, launchd, refcounted, deterministic ports) — register a `docling` role
-pointing at this server. For **prod**, run the Ray Serve app as a launchd daemon on a **labeled** fleet
-Mac (mirror the derper `ai.shubo.derper` / the `node.shubo/ozone-datanode` pinning pattern), fronted by
-a k8s Service. Mind the OrbStack double-NAT + lossy-WiFi fabric (see infra memory) when choosing the
-node and the route.
+`start-local-models.sh`, launchd, refcounted, deterministic ports — the shared host model-server port
+band is **12400-12499**, below the per-sandbox container port range so it can never collide; docling's
+derived port is **12463**) — register a `docling` role pointing at this server. For **prod**, run **N
+`server.py` processes** as launchd daemons on a **labeled** fleet Mac (mirror the derper
+`ai.shubo.derper` / the `node.shubo/ozone-datanode` pinning pattern), fronted by a round-robin k8s
+Service. Mind the OrbStack double-NAT + lossy-WiFi fabric (see infra memory) when choosing the node
+and the route.
 
 ## Build plan
 
-1. **`docling/server/`** — the Ray Serve app (`mlx_vlm` + `docling-core`), `/trigger` returns
-   `{markdown_pages, structured_document}`. Pin `mlx-vlm`, `docling-core`, model rev. Add `/health`.
+1. **`docling/server/`** — the plain-MLX FastAPI server (`mlx_vlm` + `docling-core`); `/trigger`
+   returns `{markdown_pages, structured_document}`. Pin `mlx-vlm`, `docling-core`, model rev. Add
+   `/health`.
 2. **Verify the contract** — assert `structured_document.schema_name == "DoclingDocument"` and that
    `docdoc.FromDoclingExport` parses it (reuse the #349 round-trip test).
 3. **buckle role** — register `docling` in `shared-model-servers.sh` / `start-local-models.sh`
-   (launchd, host port). Sandbox first.
+   (launchd, host port in the 12400-12499 band), gateable via `SHUBO_LOCAL_DOCLING_ENABLE`. Sandbox
+   first.
 4. **Route (Option A)** — point the parsing-router `model_url` at the host server; ingest a PDF with
    `CFG_DYNORG_DOCLING_CONVERSION_ENABLED=true` → `converted_file.evidence_tree` non-NULL → grounded
    chunking mints real `anchor_id`s.
-5. **Prod** — launchd daemon on a labeled Mac + k8s Service; benchmark per-page latency; size
-   `max_replicas`. Optionally migrate to Option B.
+5. **Prod** — N launchd daemons on a labeled Mac + a round-robin k8s Service; benchmark per-page
+   latency; size **N**. Optionally migrate to Option B.
 6. **(Later) Option B** — model-backend external-utility runtime + non-LLM `/trigger` provider.
 
 ## Why not …
 
 - **Torch/EasyOCR docling in a container** — CPU-only on the fleet (no Metal), multi-GB, slow. This is
   the status quo we're replacing.
-- **Ray inside k8s containers** — no Metal passthrough; defeats the purpose. Ray must be a host process.
-- **Plain FastAPI host server (no Ray)** — fine as an MVP (it's today's `qwen3-asr-server.py` shape),
-  but Ray Serve adds batching/replicas/autoscaling/health that the performance requirement wants. The
-  server code (mlx_vlm → DocTags → export_to_dict) is identical; Ray Serve wraps it.
+- **Ray (Serve or in-pod)** — **dropped.** Ray inside k8s containers has no Metal passthrough, so it
+  defeats the purpose; and on the host, Ray Serve's replicas/autoscaling buy nothing on a **single**
+  GPU — the one GPU is the bottleneck, so concurrency must come from N independent host processes, not
+  from in-process replicas. The plain-MLX FastAPI server is the whole design, not an MVP that Ray later
+  wraps.
+- **Co-serving docling with another model in one process** — rejected per ADR 009: one dedicated MLX
+  server per model. Co-serving just serializes two models onto the same GPU stream.
 
 ## References
 
 - Model: https://huggingface.co/ibm-granite/granite-docling-258M-mlx ·
   https://www.ibm.com/new/announcements/granite-docling-end-to-end-document-conversion
-- Ray Serve: https://docs.ray.io/en/latest/serve/index.html (deployments, `@serve.batch`, autoscaling,
-  fractional resources)
-- Backend seams: `services/model/pkg/llm/runtime/{staticruntime,rayruntime}/`,
+- Canonical design: `deploy/docs/adr/fleet/009-host-managed-mlx-model-serving.md` (ADR 009 —
+  host-managed MLX, one-dedicated-server-per-model, the pod↔host-process pattern)
+- Backend seams: `services/model/pkg/llm/runtime/staticruntime/`,
   `services/artifact/pkg/pipeline/preset/pipelines/parsing-router/v1.2.0/recipe.yaml`,
   `services/artifact/pkg/pipeline/client.go` (the "Docling Model" parser)
 - Producer contract: `backend/docs/artifact/m7-w1b-producer-wiring.md` (Part 1) · ADR-0020
   (`backend/docs/adr/dynamic-organization/0020-extraction-producer-architecture.md`)
-- Host-server pattern: `buckle/scripts/sandbox/qwen3-asr-server.py`, `shared-model-servers.sh`
+- Host-server pattern: `buckle/scripts/sandbox/qwen3-asr-server.py`,
+  `buckle/scripts/sandbox/mlx-embeddings-server.py`, `shared-model-servers.sh`
