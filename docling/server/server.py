@@ -90,6 +90,13 @@ async def trigger(namespace: str, model: str, version: str, request: Request):
         data = engine.convert(images)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"docling conversion failed: {exc}") from exc
+    # Emit structured_document as a JSON STRING (the producer-wiring contract that
+    # routedConvertResultParser expects). The parsing-router's HTTP component drops a
+    # deeply-nested object field on the way to the artifact (the flat markdown_pages
+    # list survives, the DoclingDocument tree does not), so a string is what actually
+    # reaches converted_file.evidence_tree for grounded chunking + the bbox overlay.
+    if isinstance(data, dict) and isinstance(data.get("structured_document"), (dict, list)):
+        data = {**data, "structured_document": json.dumps(data["structured_document"])}
     return {"taskOutputs": [{"data": data}]}
 
 
