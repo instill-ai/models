@@ -1,0 +1,9 @@
+# Qwen3-VL-Reranker host server — yes/no causal-logit scoring via mlx_vlm.
+# Dedicated venv (~/.shubo-llm/reranker), independent of the docling venv's
+# mlx-vlm 0.3.3 pin — Qwen3-VL needs a recent mlx-vlm (Qwen3-VL arch support).
+# Pin a known-good version here once validated on a host (load the model + score).
+mlx-vlm
+fastapi
+uvicorn[standard]
+pillow
+numpy
