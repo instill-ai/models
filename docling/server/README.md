@@ -22,11 +22,12 @@ routes to it — the same `staticruntime`/`model_url` seam the other host models
 
 ## Setup
 
-Native arm64 Python (Metal). The pins matter — see `requirements.txt` (`mlx-vlm` 0.6.x carries the
-DeepSeekOCR loader and MXFP8 quantization support required by Unlimited-OCR).
+Native arm64 Python 3.10+ (Metal). The pins matter — see `requirements.txt` (`mlx-vlm` 0.6.x
+carries the DeepSeekOCR loader and MXFP8 quantization support required by Unlimited-OCR). Do not
+use Apple's system Python 3.9; it cannot resolve the current `mlx-vlm` / Transformers pins.
 
 ```bash
-python3 -m venv .venv
+python3.12 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
 

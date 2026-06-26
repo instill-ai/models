@@ -2,6 +2,7 @@
 #
 # Unlimited-OCR MXFP8 is packaged as a DeepSeekOCR mlx-vlm model with MXFP8 quantization,
 # which needs the current 0.6.x loader/quantization support.
+# Requires Python >=3.10; Apple's system Python 3.9 will not resolve these pins.
 mlx-vlm==0.6.3
 transformers>=5.5,<6
 docling-core
