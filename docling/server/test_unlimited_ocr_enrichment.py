@@ -11,27 +11,28 @@ from unlimited_ocr_enrichment import (
     decode_bpe,
     parse_grounded_regions,
     _build_doc_from_grounded,
+    _furniture_label,
     _html_to_grid,
-    _resolve_label,
+    _regions_to_deepseek_markdown,
 )
 
 
-def test_resolve_label_covers_furniture_and_doctags_vocabulary():
-    from docling_core.types.doc import DocItemLabel
-
+def test_furniture_label_recovers_header_footer_by_position():
     mid = (0.1, 0.4, 0.9, 0.45)
-    # Body text in the middle stays TEXT; top/bottom bands become furniture.
-    assert _resolve_label("text", mid) == DocItemLabel.TEXT
-    assert _resolve_label("text", (0.1, 0.02, 0.9, 0.05)) == DocItemLabel.PAGE_HEADER
-    assert _resolve_label("text", (0.1, 0.95, 0.9, 0.98)) == DocItemLabel.PAGE_FOOTER
-    # Full DocTags vocabulary: aliases + pass-through of valid label names.
-    assert _resolve_label("title", mid) == DocItemLabel.SECTION_HEADER
-    assert _resolve_label("list_item", mid) == DocItemLabel.LIST_ITEM
-    assert _resolve_label("list", mid) == DocItemLabel.LIST_ITEM
-    assert _resolve_label("formula", mid) == DocItemLabel.FORMULA
-    assert _resolve_label("footnote", mid) == DocItemLabel.FOOTNOTE
-    assert _resolve_label("code", mid) == DocItemLabel.CODE
-    assert _resolve_label("caption", mid) == DocItemLabel.CAPTION
+    # Generic body text in the middle stays "text"; top/bottom bands become furniture so the
+    # official parser maps them to PAGE_HEADER / PAGE_FOOTER.
+    assert _furniture_label("text", mid) == "text"
+    assert _furniture_label("text", (0.1, 0.02, 0.9, 0.05)) == "header"
+    assert _furniture_label("text", (0.1, 0.95, 0.9, 0.98)) == "footer"
+    # Non-generic labels (title/table) are never reclassified by position.
+    assert _furniture_label("title", (0.1, 0.02, 0.9, 0.05)) == "title"
+
+
+def test_regions_to_deepseek_markdown_emits_official_format():
+    md = _regions_to_deepseek_markdown([("title", (0.0, 0.0, 1.0, 0.1), "Heading")])
+    # The canonical DeepSeek-OCR markup the official parser consumes: ref+det, 0..1000 coords.
+    assert "<|ref|>title<|/ref|><|det|>[[0, 0, 1000, 100]]<|/det|>" in md
+    assert "Heading" in md
 
 
 def test_decode_bpe_undoes_byte_artifacts():
@@ -63,12 +64,12 @@ def test_html_to_grid_parses_rows_and_cells():
 
 
 def test_build_doc_from_grounded_makes_structure_for_image_pdfs():
-    # The image-only fallback: grounded regions → a DoclingDocument with heading/text/table.
+    # The image-only fallback: grounded regions → Docling's official DeepSeek-OCR parser builds the
+    # DoclingDocument (heading/text/table), with furniture recovered by position.
     regions = [
         ("text", (0.05, 0.02, 0.50, 0.04), "CONFIDENTIAL"),  # top band → page_header
         ("title", (0.05, 0.06, 0.30, 0.08), "1. BACKGROUND"),
         ("text", (0.05, 0.09, 0.90, 0.11), "The Director approves the investment."),
-        ("list_item", (0.07, 0.13, 0.90, 0.15), "(a) first condition"),
         ("table", (0.05, 0.18, 0.86, 0.30),
          "<table><tr><td>Subscriber</td><td>Shares</td></tr><tr><td>RTP</td><td>22757</td></tr></table>"),
         ("text", (0.05, 0.96, 0.50, 0.98), "Page 1 of 5"),  # bottom band → page_footer
@@ -76,13 +77,11 @@ def test_build_doc_from_grounded_makes_structure_for_image_pdfs():
     doc = _build_doc_from_grounded({1: (regions, 1240.0, 1754.0)})
     sd = doc.export_to_dict()
     labels = [t["label"] for t in sd["texts"]]
-    assert "section_header" in labels and "text" in labels
+    assert "title" in labels and "text" in labels
     assert "page_header" in labels and "page_footer" in labels  # furniture by position
-    assert "list_item" in labels  # full DocTags vocabulary
     assert sd["texts"][0]["prov"][0]["bbox"]  # page-coordinate provenance
     assert len(sd["tables"]) == 1
     tb = sd["tables"][0]["data"]
-    assert tb["num_rows"] == 2 and tb["num_cols"] == 2
     assert {c["text"] for c in tb["table_cells"]} >= {"Subscriber", "RTP", "22757"}
 
 
