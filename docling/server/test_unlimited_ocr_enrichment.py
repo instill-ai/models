@@ -10,6 +10,7 @@ import pytest
 from unlimited_ocr_enrichment import (
     decode_bpe,
     parse_grounded_regions,
+    _build_doc_from_grounded,
     _html_to_grid,
 )
 
@@ -40,6 +41,25 @@ def test_html_to_grid_parses_rows_and_cells():
         "<tr><td>RTP Global</td><td>22,757</td></tr></table>"
     )
     assert grid == [["Subscriber", "Shares"], ["RTP Global", "22,757"]]
+
+
+def test_build_doc_from_grounded_makes_structure_for_image_pdfs():
+    # The image-only fallback: grounded regions → a DoclingDocument with heading/text/table.
+    regions = [
+        ("title", (0.05, 0.04, 0.30, 0.06), "1. BACKGROUND"),
+        ("text", (0.05, 0.07, 0.90, 0.09), "The Director approves the investment."),
+        ("table", (0.05, 0.10, 0.86, 0.23),
+         "<table><tr><td>Subscriber</td><td>Shares</td></tr><tr><td>RTP</td><td>22757</td></tr></table>"),
+    ]
+    doc = _build_doc_from_grounded({1: (regions, 1240.0, 1754.0)})
+    sd = doc.export_to_dict()
+    labels = [t["label"] for t in sd["texts"]]
+    assert "section_header" in labels and "text" in labels
+    assert sd["texts"][0]["prov"][0]["bbox"]  # page-coordinate provenance
+    assert len(sd["tables"]) == 1
+    tb = sd["tables"][0]["data"]
+    assert tb["num_rows"] == 2 and tb["num_cols"] == 2
+    assert {c["text"] for c in tb["table_cells"]} >= {"Subscriber", "RTP", "22757"}
 
 
 # ── integration: real Docling structure + mocked full-page OCR ────────────────────────────────
