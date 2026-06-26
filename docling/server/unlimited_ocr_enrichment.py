@@ -31,7 +31,18 @@ from PIL import Image
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions
 from docling.document_converter import DocumentConverter, PdfFormatOption
-from docling_core.types.doc import DoclingDocument, TableItem, TextItem
+from docling_core.types.doc import (
+    BoundingBox,
+    CoordOrigin,
+    DocItemLabel,
+    DoclingDocument,
+    ProvenanceItem,
+    Size,
+    TableCell,
+    TableData,
+    TableItem,
+    TextItem,
+)
 
 OcrRaw = Callable[[Image.Image], str]
 
@@ -182,6 +193,61 @@ def _fill_table_from_html(table: TableItem, html: str) -> None:
                 cell.text = text
 
 
+def _grid_to_table_data(grid: List[List[str]]) -> Optional[TableData]:
+    if not grid:
+        return None
+    n_cols = max(len(r) for r in grid)
+    cells = []
+    for ri, row in enumerate(grid):
+        for ci, txt in enumerate(row):
+            cells.append(
+                TableCell(
+                    text=txt,
+                    start_row_offset_idx=ri,
+                    end_row_offset_idx=ri + 1,
+                    start_col_offset_idx=ci,
+                    end_col_offset_idx=ci + 1,
+                    column_header=(ri == 0),
+                )
+            )
+    return TableData(table_cells=cells, num_rows=len(grid), num_cols=n_cols)
+
+
+_HEADING_LABELS = {"title", "section_header", "header", "subtitle"}
+
+
+def _build_doc_from_grounded(page_data: dict) -> DoclingDocument:
+    """Build a DoclingDocument purely from Unlimited-OCR's grounded regions — the fallback for
+    image-only PDFs, where Docling's layout (no embedded text, OCR off) produces nothing. Each
+    region becomes a text/heading/table node with a page-coordinate provenance bbox.
+
+    page_data: {page_no: (regions, page_width, page_height)}.
+    """
+    doc = DoclingDocument(name="document")
+    for page_no in sorted(page_data):
+        regions, pw, ph = page_data[page_no]
+        doc.add_page(page_no=page_no, size=Size(width=pw, height=ph))
+        for label, box, text in regions:
+            bbox = BoundingBox(
+                l=box[0] * pw,
+                t=box[1] * ph,
+                r=box[2] * pw,
+                b=box[3] * ph,
+                coord_origin=CoordOrigin.TOPLEFT,
+            )
+            prov = ProvenanceItem(page_no=page_no, bbox=bbox, charspan=(0, len(text)))
+            if label == "table":
+                td = _grid_to_table_data(_html_to_grid(text))
+                if td is not None:
+                    doc.add_table(data=td, prov=prov)
+            else:
+                doc_label = (
+                    DocItemLabel.SECTION_HEADER if label in _HEADING_LABELS else DocItemLabel.TEXT
+                )
+                doc.add_text(label=doc_label, text=text, orig=text, prov=prov)
+    return doc
+
+
 # ── conversion ───────────────────────────────────────────────────────────────────────────────
 def _structure_converter() -> DocumentConverter:
     """Docling structure only: layout + table-structure → DoclingDocument + bboxes + DocTags.
@@ -222,40 +288,46 @@ def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
         src = source
     doc: DoclingDocument = _structure_converter().convert(src).document
 
-    # Per-page OCR + map. Cache regions per page so each page is OCR'd exactly once.
-    page_regions: dict = {}
+    # OCR each page exactly once (Unlimited-OCR is full-page); cache the grounded regions.
+    page_data: dict = {}
     for page_no in sorted(doc.pages):
         page = doc.pages[page_no]
         img = page.image.pil_image if (page.image is not None) else None
         if img is None or page.size is None:
             continue
-        regions = parse_grounded_regions(ocr_raw(img))
-        page_regions[page_no] = (
-            regions,
+        page_data[page_no] = (
+            parse_grounded_regions(ocr_raw(img)),
             float(page.size.width),
             float(page.size.height),
         )
 
-    for item, _ in doc.iterate_items():
-        prov = getattr(item, "prov", None)
-        if not prov:
-            continue
-        page_no = prov[0].page_no
-        if page_no not in page_regions:
-            continue
-        regions, pw, ph = page_regions[page_no]
-        box = _norm_tl(prov[0].bbox, pw, ph)
-        if isinstance(item, TableItem):
-            treg = _best_region(box, [r for r in regions if r[0] == "table"]) or _best_region(
-                box, regions
-            )
-            if treg:
-                _fill_table_from_html(item, treg[2])
-        elif isinstance(item, TextItem):
-            reg = _best_region(box, [r for r in regions if r[0] != "table"])
-            if reg and reg[2]:
-                item.text = reg[2]
-                item.orig = reg[2]
+    # Does Docling's layout carry usable structure? Digital PDFs: yes. Image-only PDFs: no text
+    # elements and empty tables (layout needs embedded text / a working OCR) → build from the
+    # grounded OCR instead.
+    text_items = [it for it, _ in doc.iterate_items() if isinstance(it, TextItem)]
+    table_items = [it for it, _ in doc.iterate_items() if isinstance(it, TableItem)]
+    docling_has_structure = bool(text_items) or any(t.data.table_cells for t in table_items)
+
+    if not docling_has_structure and page_data:
+        doc = _build_doc_from_grounded(page_data)
+    else:
+        for item, _ in doc.iterate_items():
+            prov = getattr(item, "prov", None)
+            if not prov or prov[0].page_no not in page_data:
+                continue
+            regions, pw, ph = page_data[prov[0].page_no]
+            box = _norm_tl(prov[0].bbox, pw, ph)
+            if isinstance(item, TableItem):
+                treg = _best_region(box, [r for r in regions if r[0] == "table"]) or _best_region(
+                    box, regions
+                )
+                if treg:
+                    _fill_table_from_html(item, treg[2])
+            elif isinstance(item, TextItem):
+                reg = _best_region(box, [r for r in regions if r[0] != "table"])
+                if reg and reg[2]:
+                    item.text = reg[2]
+                    item.orig = reg[2]
 
     page_nos = sorted(doc.pages)
     markdown_pages = (
