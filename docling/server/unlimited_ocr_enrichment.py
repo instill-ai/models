@@ -213,7 +213,50 @@ def _grid_to_table_data(grid: List[List[str]]) -> Optional[TableData]:
     return TableData(table_cells=cells, num_rows=len(grid), num_cols=n_cols)
 
 
-_HEADING_LABELS = {"title", "section_header", "header", "subtitle"}
+# Map Unlimited-OCR's region labels onto the DoclingDocument label set so the full DocTags
+# vocabulary is supported (list_item, caption, formula, code, footnote, reference, …) — not just
+# text/title/table. Any label that already IS a DocItemLabel value passes through directly.
+_LABEL_ALIASES = {
+    "title": DocItemLabel.SECTION_HEADER,
+    "subtitle": DocItemLabel.SECTION_HEADER,
+    "heading": DocItemLabel.SECTION_HEADER,
+    "list": DocItemLabel.LIST_ITEM,
+    "list_item": DocItemLabel.LIST_ITEM,
+    "image_caption": DocItemLabel.CAPTION,
+    "figure_caption": DocItemLabel.CAPTION,
+    "table_caption": DocItemLabel.CAPTION,
+    "equation": DocItemLabel.FORMULA,
+}
+# Generic body labels must go through the position heuristic (furniture), not pass straight through.
+_GENERIC_TEXT_LABELS = {"text", "paragraph", "plain_text", ""}
+_VALID_LABELS = {e.value: e for e in DocItemLabel}
+# These DocItemLabels aren't produced via add_text (handled elsewhere or imageful), so a text
+# region carrying their name still falls through to the position/text logic.
+_NON_TEXT_LABELS = {DocItemLabel.TABLE, DocItemLabel.PICTURE, DocItemLabel.CHART}
+# Unlimited-OCR labels page body as plain "text" (no furniture labels), so page header/footer are
+# recovered by vertical position — restoring the page_header/page_footer nodes granite-docling
+# emitted, which the backend furniture chunking keys off.
+_HEADER_BAND = 0.07
+_FOOTER_BAND = 0.93
+
+
+def _resolve_label(label: str, box: Tuple[float, float, float, float]) -> "DocItemLabel":
+    key = (label or "").lower().strip()
+    if key in _LABEL_ALIASES:
+        return _LABEL_ALIASES[key]
+    if (
+        key not in _GENERIC_TEXT_LABELS
+        and key in _VALID_LABELS
+        and _VALID_LABELS[key] not in _NON_TEXT_LABELS
+    ):
+        return _VALID_LABELS[key]
+    # Generic / unknown text → classify furniture by position, else body text.
+    cy = (box[1] + box[3]) / 2.0
+    if cy < _HEADER_BAND:
+        return DocItemLabel.PAGE_HEADER
+    if cy > _FOOTER_BAND:
+        return DocItemLabel.PAGE_FOOTER
+    return DocItemLabel.TEXT
 
 
 def _build_doc_from_grounded(page_data: dict) -> DoclingDocument:
@@ -240,11 +283,15 @@ def _build_doc_from_grounded(page_data: dict) -> DoclingDocument:
                 td = _grid_to_table_data(_html_to_grid(text))
                 if td is not None:
                     doc.add_table(data=td, prov=prov)
-            else:
-                doc_label = (
-                    DocItemLabel.SECTION_HEADER if label in _HEADING_LABELS else DocItemLabel.TEXT
-                )
-                doc.add_text(label=doc_label, text=text, orig=text, prov=prov)
+                continue
+            resolved = _resolve_label(label, box)
+            if resolved == DocItemLabel.LIST_ITEM:
+                try:
+                    doc.add_list_item(text=text, prov=prov)
+                    continue
+                except Exception:  # noqa: BLE001 — fall back to a plain text node if no list group
+                    resolved = DocItemLabel.TEXT
+            doc.add_text(label=resolved, text=text, orig=text, prov=prov)
     return doc
 
 
