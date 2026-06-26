@@ -14,7 +14,7 @@ fpdf = pytest.importorskip("fpdf")
 
 from docling_core.types.doc import TableItem, TextItem  # noqa: E402
 
-from unlimited_ocr_enrichment import build_converter  # noqa: E402
+from unlimited_ocr_enrichment import build_converter, convert_to_contract  # noqa: E402
 
 
 def _make_pdf(path: str) -> None:
@@ -79,3 +79,21 @@ def test_structure_restored_and_every_element_reocred(tmp_path):
 
     # One OCR call per text element + per table cell (proves the wiring fans out to cells).
     assert calls["n"] >= len(text_items) + sum(1 for c in table.data.table_cells if c.bbox)
+
+
+def test_convert_to_contract_shape(tmp_path):
+    pdf_path = str(tmp_path / "doc.pdf")
+    _make_pdf(pdf_path)
+    with open(pdf_path, "rb") as fh:
+        pdf_bytes = fh.read()
+
+    out = convert_to_contract(pdf_bytes, lambda image: MARKER)
+
+    # The host-server contract the parsing-router consumes.
+    assert set(out) >= {"markdown_pages", "structured_document"}
+    assert isinstance(out["markdown_pages"], list) and out["markdown_pages"]
+    sd = out["structured_document"]
+    assert sd.get("schema_name") == "DoclingDocument"
+    assert len(sd.get("texts", [])) >= 2 and len(sd.get("tables", [])) == 1
+    # Structure carries provenance bboxes (the grounding the dashboard overlays).
+    assert sd["texts"][0]["prov"][0]["bbox"]

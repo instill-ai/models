@@ -12,12 +12,45 @@ import re
 from fastapi import Body, FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
+import base64
+import os
+
 from granite_docling import GraniteDocling, render_pdf, decode_image, DEFAULT_MODEL, DEFAULT_PDF_DPI
 
 app = FastAPI(title="docling-mlx", version="0.1.0")
 engine = GraniteDocling()
 
 _DATA_URI = re.compile(r"^data:(?P<mime>[^;,]*)(?:;base64)?,(?P<data>.*)$", re.DOTALL)
+
+
+def _structure_pipeline_enabled() -> bool:
+    """Opt-in (SHUBO_DOCLING_STRUCTURE_PIPELINE=1) and only for the OCR family: run Docling's real
+    layout+table pipeline for structure/DocTags/bboxes and re-OCR each element with Unlimited-OCR,
+    instead of the flat one-text-node-per-page Markdown wrap. granite-docling already emits DocTags,
+    so it never needs this. Default OFF so a server without the docling pipeline deps is unaffected."""
+    return (
+        os.environ.get("SHUBO_DOCLING_STRUCTURE_PIPELINE", "").strip().lower() in ("1", "true")
+        and engine.model_family == "unlimited_ocr"
+    )
+
+
+def _structured_convert(pdf_bytes: bytes) -> dict:
+    """Docling structure + Unlimited-OCR text → the {markdown_pages, structured_document} contract."""
+    from unlimited_ocr_enrichment import convert_to_contract
+
+    engine.load()
+    out = convert_to_contract(pdf_bytes, engine.page_to_text)
+    out["model"] = engine.model_id
+    out["model_family"] = engine.model_family
+    return out
+
+
+def _pdf_bytes(doc_content: str):
+    """Raw PDF bytes from a data-uri / bare-base64 doc_content, or None when it isn't a PDF."""
+    m = _DATA_URI.match(doc_content)
+    raw = base64.b64decode(m.group("data") if m else doc_content)
+    mime = (m.group("mime") if m else "") or ""
+    return raw if ("pdf" in mime.lower() or raw[:5] == b"%PDF-") else None
 
 
 def _images_from_doc(doc_content: str):
@@ -46,6 +79,11 @@ def health():
 # server for ~2.3s/page; for concurrent throughput use the Ray Serve front (serve_app.py).
 @app.post("/convert")
 async def convert(req: ConvertRequest):
+    if req.pdf_b64 and _structure_pipeline_enabled():
+        try:
+            return _structured_convert(base64.b64decode(req.pdf_b64))
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail=f"structured conversion failed: {exc}") from exc
     if req.pdf_b64:
         images = render_pdf(base64.b64decode(req.pdf_b64), DEFAULT_PDF_DPI)
     elif req.image_b64:
@@ -83,13 +121,21 @@ async def trigger(namespace: str, model: str, version: str, request: Request):
         shape = list(body) if isinstance(body, dict) else type(body).__name__
         print(f"[trigger] unexpected body shape: {shape}", flush=True)
         raise HTTPException(status_code=400, detail="expected taskInputs[0].data.doc_content (data-uri)")
-    images = _images_from_doc(doc_content)
-    if not images:
-        raise HTTPException(status_code=400, detail="no pages to convert")
-    try:
-        data = engine.convert(images)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"docling conversion failed: {exc}") from exc
+    pdf = _pdf_bytes(doc_content) if _structure_pipeline_enabled() else None
+    if pdf is not None:
+        # Structure pipeline: Docling layout/table → DocTags + bboxes, Unlimited-OCR text per element.
+        try:
+            data = _structured_convert(pdf)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail=f"structured conversion failed: {exc}") from exc
+    else:
+        images = _images_from_doc(doc_content)
+        if not images:
+            raise HTTPException(status_code=400, detail="no pages to convert")
+        try:
+            data = engine.convert(images)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail=f"docling conversion failed: {exc}") from exc
     # Strip pages[*].image from structured_document before JSON-stringifying it.
     # The rasterized page images (~60 KB base64 PNG each) bloat the field to ~65 KB
     # which exceeds pipeline proto/structpb limits → evidenceTreeBytes 0 in the

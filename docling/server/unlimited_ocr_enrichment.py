@@ -16,7 +16,9 @@ writing the high-accuracy text back onto the element. Result: Unlimited-OCR accu
 """
 from __future__ import annotations
 
+import io
 from collections.abc import Callable, Iterable
+from typing import Union
 
 from PIL import Image
 
@@ -150,3 +152,28 @@ def build_converter(ocr_image: OcrImage) -> DocumentConverter:
             )
         }
     )
+
+
+def convert_to_contract(source: Union[str, bytes], ocr_image: OcrImage) -> dict:
+    """Convert a PDF (path or raw bytes) into the docling host-server contract:
+    `{markdown_pages: [...], structured_document: {...}}` (schema_name "DoclingDocument"),
+    exactly what routedConvertResultParser consumes — but now with real structure + DocTags
+    and Unlimited-OCR text. `structured_document` is the DoclingDocument tree the artifact
+    persists to evidence_tree; `markdown_pages` is one Markdown string per page.
+    """
+    from docling.datamodel.base_models import DocumentStream
+
+    if isinstance(source, bytes):
+        src: Union[str, DocumentStream] = DocumentStream(
+            name="document.pdf", stream=io.BytesIO(source)
+        )
+    else:
+        src = source
+    doc: DoclingDocument = build_converter(ocr_image).convert(src).document
+    page_nos = sorted(doc.pages)
+    markdown_pages = (
+        [doc.export_to_markdown(page_no=p) for p in page_nos]
+        if page_nos
+        else [doc.export_to_markdown()]
+    )
+    return {"markdown_pages": markdown_pages, "structured_document": doc.export_to_dict()}
