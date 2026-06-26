@@ -31,7 +31,16 @@ from PIL import Image
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions
 from docling.document_converter import DocumentConverter, PdfFormatOption
-from docling_core.types.doc import DoclingDocument, Size, TableItem, TextItem
+from docling_core.types.doc import (
+    BoundingBox,
+    CoordOrigin,
+    DocItemLabel,
+    DoclingDocument,
+    ProvenanceItem,
+    Size,
+    TableItem,
+    TextItem,
+)
 
 OcrRaw = Callable[[Image.Image], str]
 
@@ -182,69 +191,105 @@ def _fill_table_from_html(table: TableItem, html: str) -> None:
                 cell.text = text
 
 
-# Unlimited-OCR labels page body as plain "text" (no furniture labels, and it often misses
-# footers), so page header/footer are recovered by vertical position before parsing — relabeling a
-# top/bottom-band text region "header"/"footer" lets the official parser map it to
-# PAGE_HEADER/PAGE_FOOTER, restoring the furniture nodes granite-docling emitted (the backend
-# furniture chunking keys off them).
+# Map a region label onto the FULL DoclingDocument label vocabulary (docling
+# datamodel.document.layout_label_to_ds_type) — not the subset the official DeepSeek-OCR parser
+# covers. Aliases handle the model's label strings; any label that already IS a DocItemLabel value
+# (formula, list_item, code, footnote, reference, caption, page_header, …) passes straight through.
+_LABEL_ALIASES = {
+    "title": DocItemLabel.SECTION_HEADER,
+    "sub_title": DocItemLabel.SECTION_HEADER,
+    "subtitle": DocItemLabel.SECTION_HEADER,
+    "heading": DocItemLabel.SECTION_HEADER,
+    "header": DocItemLabel.PAGE_HEADER,
+    "footer": DocItemLabel.PAGE_FOOTER,
+    "list": DocItemLabel.LIST_ITEM,
+    "image": DocItemLabel.PICTURE,
+    "figure": DocItemLabel.PICTURE,
+    "image_caption": DocItemLabel.CAPTION,
+    "figure_caption": DocItemLabel.CAPTION,
+    "table_caption": DocItemLabel.CAPTION,
+    "equation": DocItemLabel.FORMULA,
+}
+# Generic body labels go through the furniture/position heuristic, not straight through.
 _GENERIC_TEXT_LABELS = {"text", "paragraph", "plain_text", ""}
+_VALID_LABELS = {e.value: e for e in DocItemLabel}
+# Labels not emitted as a text node (built elsewhere / imageful) — a text region carrying one of
+# these names still falls through to the furniture/text logic.
+_NON_TEXT_LABELS = {
+    DocItemLabel.TABLE,
+    DocItemLabel.PICTURE,
+    DocItemLabel.CHART,
+    DocItemLabel.FORM,
+    DocItemLabel.KEY_VALUE_REGION,
+}
+# Unlimited-OCR labels page body as plain "text" (no furniture labels, and it often misses
+# footers), so page header/footer are recovered by vertical position — restoring the
+# page_header/page_footer nodes granite-docling emitted (the backend furniture chunking keys off
+# them).
 _HEADER_BAND = 0.07
 _FOOTER_BAND = 0.93
 
 
-def _furniture_label(label: str, box: Tuple[float, float, float, float]) -> str:
-    if (label or "").lower().strip() not in _GENERIC_TEXT_LABELS:
-        return label
+def _resolve_label(label: str, box: Tuple[float, float, float, float]) -> DocItemLabel:
+    key = (label or "").lower().strip()
+    if key in _LABEL_ALIASES:
+        return _LABEL_ALIASES[key]
+    if (
+        key not in _GENERIC_TEXT_LABELS
+        and key in _VALID_LABELS
+        and _VALID_LABELS[key] not in _NON_TEXT_LABELS
+    ):
+        return _VALID_LABELS[key]
     cy = (box[1] + box[3]) / 2.0
     if cy < _HEADER_BAND:
-        return "header"
+        return DocItemLabel.PAGE_HEADER
     if cy > _FOOTER_BAND:
-        return "footer"
-    return label
-
-
-def _regions_to_deepseek_markdown(regions: List[Region]) -> str:
-    """Render parsed regions into Docling's canonical DeepSeek-OCR markup — one
-    `<|ref|>label<|/ref|><|det|>[[x,y,x,y]]<|/det|>` marker line followed by its content — with
-    coordinates back in the 0..1000 space the official parser expects. Furniture is recovered by
-    position first. (The MLX model emits a single-bracket, byte-BPE variant that parse_grounded_
-    regions already normalizes; this re-emits the standard form the official parser consumes.)"""
-    lines: List[str] = []
-    for label, box, text in regions:
-        lab = _furniture_label(label, box)
-        coords = ", ".join(str(int(round(v * 1000))) for v in box)
-        lines.append(f"<|ref|>{lab}<|/ref|><|det|>[[{coords}]]<|/det|>")
-        lines.append(text)
-        lines.append("")
-    return "\n".join(lines)
+        return DocItemLabel.PAGE_FOOTER
+    return DocItemLabel.TEXT
 
 
 def _build_doc_from_grounded(page_data: dict) -> DoclingDocument:
-    """Build a DoclingDocument from Unlimited-OCR's grounded regions via Docling's OFFICIAL
-    DeepSeek-OCR parser (`docling.utils.deepseekocr_utils.parse_deepseekocr_markdown`) — the
-    canonical label map plus robust HTML-table parsing (colspan/rowspan) and caption linking. This
-    is the fallback for image-only PDFs, where Docling's layout (OCR off, no text cells) produces
-    nothing. Each page is parsed independently then merged with DoclingDocument.concatenate.
+    """Build a DoclingDocument from Unlimited-OCR's grounded regions — the fallback for image-only
+    PDFs, where Docling's layout (OCR off, no text cells) produces nothing. Each region maps to the
+    FULL DocItemLabel vocabulary (`_resolve_label`); tables use Docling's official robust HTML parser
+    (`deepseekocr_utils._parse_table_html`, colspan/rowspan); furniture is recovered by position.
 
     page_data: {page_no: (regions, page_width, page_height)}.
     """
-    from docling.utils.deepseekocr_utils import parse_deepseekocr_markdown
+    from docling.utils.deepseekocr_utils import _parse_table_html
 
-    docs = []
+    doc = DoclingDocument(name="document")
     for page_no in sorted(page_data):
         regions, pw, ph = page_data[page_no]
-        if not regions:
-            continue
-        docs.append(
-            parse_deepseekocr_markdown(
-                _regions_to_deepseek_markdown(regions),
-                Size(width=pw, height=ph),
+        doc.add_page(page_no=page_no, size=Size(width=pw, height=ph))
+        for label, box, text in regions:
+            prov = ProvenanceItem(
                 page_no=page_no,
+                bbox=BoundingBox(
+                    l=box[0] * pw, t=box[1] * ph, r=box[2] * pw, b=box[3] * ph,
+                    coord_origin=CoordOrigin.TOPLEFT,
+                ),
+                charspan=(0, len(text)),
             )
-        )
-    if not docs:
-        return DoclingDocument(name="document")
-    return docs[0] if len(docs) == 1 else DoclingDocument.concatenate(docs)
+            resolved = _resolve_label(label, box)
+            if (label or "").lower().strip() == "table" or resolved == DocItemLabel.TABLE:
+                try:
+                    td = _parse_table_html(text)
+                except Exception:  # noqa: BLE001
+                    td = None
+                if td is not None and td.table_cells:
+                    doc.add_table(data=td, prov=prov)
+                continue
+            if resolved == DocItemLabel.PICTURE:
+                continue  # no OCR text to attach to a bare picture
+            if resolved == DocItemLabel.LIST_ITEM:
+                try:
+                    doc.add_list_item(text=text, prov=prov)
+                    continue
+                except Exception:  # noqa: BLE001 — no list group → plain text node
+                    resolved = DocItemLabel.TEXT
+            doc.add_text(label=resolved, text=text, orig=text, prov=prov)
+    return doc
 
 
 # ── conversion ───────────────────────────────────────────────────────────────────────────────

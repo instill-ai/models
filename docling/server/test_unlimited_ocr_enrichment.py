@@ -11,28 +11,27 @@ from unlimited_ocr_enrichment import (
     decode_bpe,
     parse_grounded_regions,
     _build_doc_from_grounded,
-    _furniture_label,
     _html_to_grid,
-    _regions_to_deepseek_markdown,
+    _resolve_label,
 )
 
 
-def test_furniture_label_recovers_header_footer_by_position():
+def test_resolve_label_covers_full_doctags_vocabulary_and_furniture():
+    from docling_core.types.doc import DocItemLabel
+
     mid = (0.1, 0.4, 0.9, 0.45)
-    # Generic body text in the middle stays "text"; top/bottom bands become furniture so the
-    # official parser maps them to PAGE_HEADER / PAGE_FOOTER.
-    assert _furniture_label("text", mid) == "text"
-    assert _furniture_label("text", (0.1, 0.02, 0.9, 0.05)) == "header"
-    assert _furniture_label("text", (0.1, 0.95, 0.9, 0.98)) == "footer"
-    # Non-generic labels (title/table) are never reclassified by position.
-    assert _furniture_label("title", (0.1, 0.02, 0.9, 0.05)) == "title"
-
-
-def test_regions_to_deepseek_markdown_emits_official_format():
-    md = _regions_to_deepseek_markdown([("title", (0.0, 0.0, 1.0, 0.1), "Heading")])
-    # The canonical DeepSeek-OCR markup the official parser consumes: ref+det, 0..1000 coords.
-    assert "<|ref|>title<|/ref|><|det|>[[0, 0, 1000, 100]]<|/det|>" in md
-    assert "Heading" in md
+    # Body text in the middle stays TEXT; top/bottom bands become furniture.
+    assert _resolve_label("text", mid) == DocItemLabel.TEXT
+    assert _resolve_label("text", (0.1, 0.02, 0.9, 0.05)) == DocItemLabel.PAGE_HEADER
+    assert _resolve_label("text", (0.1, 0.95, 0.9, 0.98)) == DocItemLabel.PAGE_FOOTER
+    # Aliases for the model's label strings.
+    assert _resolve_label("title", mid) == DocItemLabel.SECTION_HEADER
+    assert _resolve_label("header", mid) == DocItemLabel.PAGE_HEADER
+    assert _resolve_label("footer", mid) == DocItemLabel.PAGE_FOOTER
+    assert _resolve_label("equation", mid) == DocItemLabel.FORMULA
+    # Full vocabulary passes straight through (the official parser can't emit these).
+    for name in ("list_item", "formula", "code", "footnote", "caption", "reference", "section_header"):
+        assert _resolve_label(name, mid) == DocItemLabel(name)
 
 
 def test_decode_bpe_undoes_byte_artifacts():
@@ -64,21 +63,22 @@ def test_html_to_grid_parses_rows_and_cells():
 
 
 def test_build_doc_from_grounded_makes_structure_for_image_pdfs():
-    # The image-only fallback: grounded regions → Docling's official DeepSeek-OCR parser builds the
-    # DoclingDocument (heading/text/table), with furniture recovered by position.
+    # The image-only fallback: grounded regions → DoclingDocument covering the FULL label
+    # vocabulary, furniture by position, and tables via the official robust HTML parser.
     regions = [
         ("text", (0.05, 0.02, 0.50, 0.04), "CONFIDENTIAL"),  # top band → page_header
-        ("title", (0.05, 0.06, 0.30, 0.08), "1. BACKGROUND"),
+        ("title", (0.05, 0.06, 0.30, 0.08), "1. BACKGROUND"),  # → section_header
         ("text", (0.05, 0.09, 0.90, 0.11), "The Director approves the investment."),
-        ("table", (0.05, 0.18, 0.86, 0.30),
+        ("list_item", (0.07, 0.13, 0.90, 0.15), "(a) first condition"),
+        ("formula", (0.07, 0.16, 0.50, 0.18), "E = mc^2"),
+        ("table", (0.05, 0.20, 0.86, 0.32),
          "<table><tr><td>Subscriber</td><td>Shares</td></tr><tr><td>RTP</td><td>22757</td></tr></table>"),
         ("text", (0.05, 0.96, 0.50, 0.98), "Page 1 of 5"),  # bottom band → page_footer
     ]
     doc = _build_doc_from_grounded({1: (regions, 1240.0, 1754.0)})
     sd = doc.export_to_dict()
-    labels = [t["label"] for t in sd["texts"]]
-    assert "title" in labels and "text" in labels
-    assert "page_header" in labels and "page_footer" in labels  # furniture by position
+    labels = {t["label"] for t in sd["texts"]}
+    assert {"section_header", "text", "page_header", "page_footer", "list_item", "formula"} <= labels
     assert sd["texts"][0]["prov"][0]["bbox"]  # page-coordinate provenance
     assert len(sd["tables"]) == 1
     tb = sd["tables"][0]["data"]
