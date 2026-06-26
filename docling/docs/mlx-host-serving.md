@@ -23,41 +23,36 @@ Structure-aware RAG needs a **docling producer** that emits the canonical `Docli
    one-dedicated-server-per-model rule), and page throughput is bought by **process count**, not by
    stacking replicas onto one GPU.
 
-## The model — `granite-docling-258M-mlx` (the convergence)
+## The model — `unlimited-ocr-mxfp8-mlx` (the default)
 
-[`ibm-granite/granite-docling-258M-mlx`](https://huggingface.co/ibm-granite/granite-docling-258M-mlx)
-is a **258M-param vision-language model** (631 MB, 4-bit MLX, "optimized to run efficiently on Apple
-Silicon"). It replaces the heavy torch+EasyOCR docling stack with **one tiny Metal-accelerated VLM**:
+[`sahilchachra/unlimited-ocr-mxfp8-mlx`](https://huggingface.co/sahilchachra/unlimited-ocr-mxfp8-mlx)
+is the default document OCR/parser checkpoint. The model card reports **4.98 GB peak memory** and
+**3.66 GB disk** on an M4 Pro, with stronger OCR quality than the lower-memory 4-bit variants.
+It replaces the heavy torch+EasyOCR docling stack with a Metal-accelerated VLM:
 
-- **Input:** a rendered **page image** (PIL). **Output:** **DocTags** — a layout-preserving markup
-  (tables, code, math, reading order, bboxes).
-- **It produces our exact contract.** DocTags convert straight to a `DoclingDocument`, which exports
-  the tree we already consume:
+- **Input:** a rendered **page image** (PIL). **Output:** Markdown from Unlimited-OCR.
+- **It preserves our backend contract.** The server keeps the model output in `markdown_pages` and
+  wraps each page into a minimal `DoclingDocument` text leaf so `docdoc.FromDoclingExport` continues
+  to consume `structured_document`:
 
 ```python
-from mlx_vlm import load, generate
-from mlx_vlm.prompt_utils import apply_chat_template
-from docling_core.types.doc.document import DocTagsDocument, DoclingDocument
+from granite_docling import GraniteDocling
 from PIL import Image
 
-model, processor, config = load("ibm-granite/granite-docling-258M-mlx")   # cold load (Metal)
-pil = Image.open(page_png)                                                # one page
-prompt = apply_chat_template(processor, config, "Convert this page to docling.", num_images=1)
-doctags = generate(model, processor, prompt, pil, max_tokens=4096, temperature=0.0, verbose=False)
+engine = GraniteDocling("sahilchachra/unlimited-ocr-mxfp8-mlx").load()
+result = engine.convert([Image.open(page_png).convert("RGB")])
 
-dtd  = DocTagsDocument.from_doctags_and_image_pairs([doctags], [pil])
-doc  = DoclingDocument.load_from_doctags(dtd)
-structured_document = doc.export_to_dict()    # ← schema_name="DoclingDocument" — the M7 contract
-markdown            = doc.export_to_markdown() # ← the markdown_pages the recipe already reads
+structured_document = result["structured_document"]  # schema_name="DoclingDocument"
+markdown_pages      = result["markdown_pages"]
 ```
 
 So a single host server returns **both** `markdown_pages` (unchanged contract) **and**
 `structured_document` (the W1b payload) — it *is* the producer the M7 handoff
 (`m7-w1b-producer-wiring.md` Part 1) asks for, and it runs on Metal.
 
-> Note: granite-docling is **page-image → DocTags**, so the server is fed page renders. Multi-page
-> docs fan out page-by-page (see throughput). This matches the visual-RAG direction (ADR-0021) — the
-> page image is already in hand.
+> Note: `ibm-granite/granite-docling-258M-mlx` remains supported via
+> `SHUBO_DOCLING_MODEL=ibm-granite/granite-docling-258M-mlx` when a smaller DocTags producer is more
+> important than OCR quality.
 
 ## Serving — a plain-MLX FastAPI process on the macOS host
 
@@ -73,7 +68,7 @@ process per model**, a plain `mlx_vlm`-backed FastAPI app — **no Ray** (see "W
 
 ### The server (`server/server.py`)
 
-`server.py` loads `ibm-granite/granite-docling-258M-mlx` once and exposes three routes:
+`server.py` loads `sahilchachra/unlimited-ocr-mxfp8-mlx` once by default and exposes three routes:
 
 - **`GET /health`** — `{status, model, loaded}`.
 - **`POST /convert`** — `{"pdf_b64": "…"}` or `{"image_b64": "…"}` → the DoclingDocument contract.
@@ -108,10 +103,10 @@ processes share the one GPU with the host's other model servers).
 
 | Lever | Why it helps | Notes |
 |---|---|---|
-| **Tiny model (631 MB)** | Many warm processes fit in unified memory | vs multi-GB torch docling; cold-load once per process |
+| **MXFP8 quantization** | Keeps Unlimited-OCR under ~5 GB peak memory | one worker per constrained MacBook until measured otherwise |
 | **MLX unified memory** | Zero CPU↔GPU copy on Apple Silicon | MLX is designed for this; the whole reason to host on the Mac |
 | **N processes behind a Service** | Page-level parallelism across a doc's pages | small model → high process density per Mac |
-| **`max_tokens` cap + `temp=0.0`** | Bounded, deterministic generation | DocTags are compact; cap per page |
+| **`max_tokens` cap + `temp=0.0`** | Bounded, deterministic generation | cap per page |
 | **Page fan-out** | A 30-page PDF = 30 independent requests | the round-robin Service spreads them across processes |
 
 Primary throughput = **processes × per-page latency**. Benchmark per-page latency on the target Mac
@@ -178,7 +173,8 @@ and the route.
 
 ## References
 
-- Model: https://huggingface.co/ibm-granite/granite-docling-258M-mlx ·
+- Default model: https://huggingface.co/sahilchachra/unlimited-ocr-mxfp8-mlx
+- Granite fallback: https://huggingface.co/ibm-granite/granite-docling-258M-mlx ·
   https://www.ibm.com/new/announcements/granite-docling-end-to-end-document-conversion
 - Canonical design: `deploy/docs/adr/fleet/009-host-managed-mlx-model-serving.md` (ADR 009 —
   host-managed MLX, one-dedicated-server-per-model, the pod↔host-process pattern)

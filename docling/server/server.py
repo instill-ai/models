@@ -1,4 +1,4 @@
-"""granite-docling MLX host server (plain FastAPI MVP) — Metal-accelerated document parsing.
+"""Docling MLX host server (plain FastAPI MVP) — Metal-accelerated document parsing.
 
 The simplest deployable form (mirrors buckle's qwen3-asr-server.py): one model, single process.
 For multi-replica throughput use the Ray Serve front (`serve_app.py`) — same core, wrapped.
@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from granite_docling import GraniteDocling, render_pdf, decode_image, DEFAULT_MODEL, DEFAULT_PDF_DPI
 
-app = FastAPI(title="granite-docling-mlx", version="0.1.0")
+app = FastAPI(title="docling-mlx", version="0.1.0")
 engine = GraniteDocling()
 
 _DATA_URI = re.compile(r"^data:(?P<mime>[^;,]*)(?:;base64)?,(?P<data>.*)$", re.DOTALL)
