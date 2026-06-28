@@ -11,7 +11,10 @@ from unlimited_ocr_enrichment import (
     decode_bpe,
     parse_grounded_regions,
     _build_doc_from_grounded,
+    _center_in_any,
+    _enrich_formulas,
     _html_to_grid,
+    _inject_formulas,
     _resolve_label,
 )
 
@@ -83,6 +86,56 @@ def test_build_doc_from_grounded_makes_structure_for_image_pdfs():
     assert len(sd["tables"]) == 1
     tb = sd["tables"][0]["data"]
     assert {c["text"] for c in tb["table_cells"]} >= {"Subscriber", "RTP", "22757"}
+
+
+# ── formula enrichment: pure helpers (no model) ───────────────────────────────────────────────
+def test_center_in_any_detects_containment():
+    boxes = [(0.10, 0.10, 0.40, 0.20)]
+    assert _center_in_any((0.20, 0.12, 0.30, 0.18), boxes) is True  # centre inside
+    assert _center_in_any((0.50, 0.50, 0.60, 0.60), boxes) is False  # disjoint
+    assert _center_in_any((0.0, 0.0, 1.0, 1.0), []) is False  # no formula boxes
+
+
+def test_inject_formulas_adds_latex_region_and_suppresses_overlapping_ocr():
+    # OCR produced a garbled transcription of the formula plus a real body paragraph; injection must
+    # drop the overlapping OCR region, add a `formula` region carrying the LaTeX, and keep the body.
+    regions = [
+        ("text", (0.10, 0.10, 0.40, 0.20), "E equals m c squared garbled"),  # overlaps the formula
+        ("text", (0.10, 0.50, 0.90, 0.55), "Real body paragraph"),          # disjoint → kept
+        ("table", (0.10, 0.12, 0.40, 0.18), "<table></table>"),             # table never suppressed
+    ]
+    page_data = {1: (regions, 1000.0, 1400.0)}
+    formula_regions = {1: [((0.10, 0.10, 0.40, 0.20), r"E = mc^{2}")]}
+    _inject_formulas(page_data, formula_regions)
+    out = page_data[1][0]
+    labels_texts = [(r[0], r[2]) for r in out]
+    assert ("formula", r"E = mc^{2}") in labels_texts
+    assert ("text", "Real body paragraph") in labels_texts
+    assert ("text", "E equals m c squared garbled") not in labels_texts  # suppressed
+    assert ("table", "<table></table>") in labels_texts  # tables survive overlap
+
+
+def test_inject_formulas_then_build_yields_formula_node_with_latex():
+    # End-to-end of the image-PDF formula path WITHOUT the model: inject + grounded-build →
+    # a FORMULA node whose text is the LaTeX (what the persisted formula chunk will carry).
+    regions = [("text", (0.05, 0.50, 0.90, 0.55), "Some body text about attention.")]
+    page_data = {1: (list(regions), 1000.0, 1400.0)}
+    _inject_formulas(page_data, {1: [((0.10, 0.10, 0.60, 0.20), r"\frac{QK^{T}}{\sqrt{d_k}}")]})
+    doc = _build_doc_from_grounded(page_data)
+    formulas = [t for t in doc.export_to_dict()["texts"] if t["label"] == "formula"]
+    assert len(formulas) == 1
+    assert formulas[0]["text"] == r"\frac{QK^{T}}{\sqrt{d_k}}"
+
+
+def test_enrich_formulas_killswitch_is_noop(monkeypatch):
+    # With the killswitch off, enrichment must NOT touch the model or the doc (returns empty harvest).
+    monkeypatch.setattr("unlimited_ocr_enrichment._FORMULA_ENRICHMENT", False)
+
+    def _boom():  # pragma: no cover - must never be called
+        raise AssertionError("model must not load when formula enrichment is disabled")
+
+    monkeypatch.setattr("unlimited_ocr_enrichment._get_formula_model", _boom)
+    assert _enrich_formulas(_build_doc_from_grounded({1: ([], 100.0, 100.0)})) == {}
 
 
 # ── integration: real Docling structure + mocked full-page OCR ────────────────────────────────
