@@ -12,6 +12,7 @@ from unlimited_ocr_enrichment import (
     parse_grounded_regions,
     _build_doc_from_grounded,
     _center_in_any,
+    _correct_furniture_labels,
     _enrich_formulas,
     _html_to_grid,
     _inject_formulas,
@@ -86,6 +87,49 @@ def test_build_doc_from_grounded_makes_structure_for_image_pdfs():
     assert len(sd["tables"]) == 1
     tb = sd["tables"][0]["data"]
     assert {c["text"] for c in tb["table_cells"]} >= {"Subscriber", "RTP", "22757"}
+
+
+def test_correct_furniture_labels_demotes_body_mislabels():
+    # Docling's digital/structured path keeps layout labels verbatim, and the layout model sometimes
+    # tags a real content line as page_header/page_footer. The correction pass demotes a CONTENT-LIKE
+    # line that sits OUTSIDE the margin band back to TEXT, while keeping genuine furniture (in-band) and
+    # short page-number-like furniture displaced into the body.
+    from docling_core.types.doc import (
+        BoundingBox,
+        CoordOrigin,
+        DocItemLabel,
+        DoclingDocument,
+        ProvenanceItem,
+        Size,
+    )
+
+    doc = DoclingDocument(name="t")
+    doc.add_page(page_no=1, size=Size(width=100.0, height=100.0))
+
+    def add(label, text, top, bot):
+        prov = ProvenanceItem(
+            page_no=1,
+            bbox=BoundingBox(l=10.0, t=top, r=90.0, b=bot, coord_origin=CoordOrigin.TOPLEFT),
+            charspan=(0, len(text)),
+        )
+        return doc.add_text(label=label, text=text, orig=text, prov=prov)
+
+    # Mislabeled mid-page content (content-like, outside the bands) → demote to TEXT.
+    body_footer = add(DocItemLabel.PAGE_FOOTER, "This is a real body sentence mislabeled as a footer.", 40.0, 44.0)
+    body_header = add(DocItemLabel.PAGE_HEADER, "Another mislabeled mid-page content heading line.", 45.0, 48.0)
+    # Genuine furniture in the margin bands → keep.
+    real_footer = add(DocItemLabel.PAGE_FOOTER, "Journal of Foo, Vol 3, 2026", 95.0, 98.0)
+    real_header = add(DocItemLabel.PAGE_HEADER, "Running head: FOO BAR", 2.0, 5.0)
+    # Short page-number furniture displaced into the body (not content-like) → keep.
+    page_num = add(DocItemLabel.PAGE_FOOTER, "12", 50.0, 52.0)
+
+    _correct_furniture_labels(doc)
+
+    assert body_footer.label == DocItemLabel.TEXT
+    assert body_header.label == DocItemLabel.TEXT
+    assert real_footer.label == DocItemLabel.PAGE_FOOTER
+    assert real_header.label == DocItemLabel.PAGE_HEADER
+    assert page_num.label == DocItemLabel.PAGE_FOOTER
 
 
 # ── formula enrichment: pure helpers (no model) ───────────────────────────────────────────────

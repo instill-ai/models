@@ -378,6 +378,43 @@ def _norm_tl(bbox, page_w: float, page_h: float) -> Tuple[float, float, float, f
     return (tl.l / page_w, tl.t / page_h, tl.r / page_w, tl.b / page_h)
 
 
+def _correct_furniture_labels(doc: DoclingDocument) -> None:
+    """Demote a BODY-positioned line that Docling mislabeled page_header/page_footer back to TEXT.
+
+    The digital/structured path keeps Docling's layout labels verbatim, and Docling's layout model
+    sometimes tags a real content line as page_header/page_footer. That silently drops it from content
+    chunks / retrieval, because the backend furniture chunking keys off those labels (and they fail
+    IsEvidenceLabel). This is the inverse of `_resolve_label`'s margin rule, applied as a CORRECTION
+    over the FINAL doc so it covers every path (digital/structured, OCR-mapped, and the grounded
+    rebuild). Position is the strong signal — genuine furniture is ALWAYS in the top/bottom margin
+    band; the content-like guard (long or multi-word) keeps a short page number that sits slightly
+    inside the body from being demoted. Mutates labels in place; no-op when nothing qualifies.
+    """
+    for item, _ in doc.iterate_items():
+        if not isinstance(item, TextItem):
+            continue
+        if item.label not in (DocItemLabel.PAGE_HEADER, DocItemLabel.PAGE_FOOTER):
+            continue
+        prov = getattr(item, "prov", None)
+        if not prov:
+            continue
+        page = doc.pages.get(prov[0].page_no)
+        if page is None or page.size is None:
+            continue
+        _, t, _, b = _norm_tl(prov[0].bbox, float(page.size.width), float(page.size.height))
+        cy = (t + b) / 2.0
+        txt = (item.text or "").strip()
+        content_like = len(txt) > 15 or " " in txt
+        if not content_like:
+            continue  # short / number-like (page numbers, running heads) → genuine furniture, keep
+        # A genuine footer sits in the bottom band (cy > _FOOTER_BAND); a genuine header in the top
+        # band (cy < _HEADER_BAND). A content-like line OUTSIDE its band carries the label wrongly.
+        if item.label == DocItemLabel.PAGE_FOOTER and cy <= _FOOTER_BAND:
+            item.label = DocItemLabel.TEXT
+        elif item.label == DocItemLabel.PAGE_HEADER and cy >= _HEADER_BAND:
+            item.label = DocItemLabel.TEXT
+
+
 # ── formula enrichment ───────────────────────────────────────────────────────────────────────────
 _FORMULA_MODEL = None  # lazily-loaded singleton (load once, reuse across requests; serial on one GPU)
 _FORMULA_MODEL_FAILED = False
@@ -603,6 +640,11 @@ def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
                 if reg and reg[2]:
                     item.text = reg[2]
                     item.orig = reg[2]
+
+    # Correct any body line Docling's layout mislabeled as page furniture — runs on the FINAL doc so
+    # it covers both the grounded rebuild and the digital/structured path (which keeps layout labels
+    # verbatim). Without this, a mislabeled content line is dropped from chunks by furniture chunking.
+    _correct_furniture_labels(doc)
 
     page_nos = sorted(doc.pages)
     markdown_pages = (
