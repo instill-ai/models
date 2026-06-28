@@ -123,7 +123,11 @@ def _grounded(label, l, t, r, b, text):
     return f"<|det|>{label}Ġ[{coords}]<|/det|>{text.replace(' ', 'Ġ')}"
 
 
-def test_structure_restored_and_text_mapped_from_full_page_ocr(tmp_path):
+def test_structure_restored_and_text_mapped_from_full_page_ocr(tmp_path, monkeypatch):
+    # This case validates the OCR-mapping path (scanned-page behavior). The generated PDF HAS a
+    # digital text layer, so disable the digital-text fast path here — otherwise OCR is (correctly)
+    # skipped for it; the fast path itself is covered by the test below.
+    monkeypatch.setattr("unlimited_ocr_enrichment._DIGITAL_FASTPATH", False)
     pdf_path = str(tmp_path / "doc.pdf")
     _make_pdf(pdf_path)
     with open(pdf_path, "rb") as fh:
@@ -162,3 +166,34 @@ def test_structure_restored_and_text_mapped_from_full_page_ocr(tmp_path):
     # Table cells were filled from the OCR region's HTML, aligned to Docling's grid.
     assert "OCR RTP" in full_md and "OCR Berlin" in full_md
     assert sd["texts"][0]["prov"][0]["bbox"]  # provenance bboxes intact
+
+
+def test_digital_text_fast_path_skips_ocr_for_digital_pdf(tmp_path, monkeypatch):
+    # A digital PDF (embedded text layer) must use Docling's exact text and SKIP the expensive MLX
+    # OCR entirely — the per-page fast path. Force the fast path on with a low char floor so the
+    # test is independent of the ambient env / exact extracted-char count.
+    monkeypatch.setattr("unlimited_ocr_enrichment._DIGITAL_FASTPATH", True)
+    monkeypatch.setattr("unlimited_ocr_enrichment._MIN_DIGITAL_TEXT_CHARS", 10)
+    pdf_path = str(tmp_path / "doc.pdf")
+    _make_pdf(pdf_path)
+    with open(pdf_path, "rb") as fh:
+        pdf_bytes = fh.read()
+
+    calls = {"n": 0}
+
+    def ocr_raw(_image):
+        calls["n"] += 1
+        return "SHOULD NOT BE CALLED"
+
+    out = convert_to_contract(pdf_bytes, ocr_raw)
+
+    # OCR was skipped for the digital page (this is the whole point of the fast path).
+    assert calls["n"] == 0
+    full_md = "\n".join(out["markdown_pages"])
+    # Docling's own exact digital text is what lands — not the OCR fake.
+    assert "BACKGROUND" in full_md and "Director" in full_md
+    assert "SHOULD NOT BE CALLED" not in full_md
+    sd = out["structured_document"]
+    assert sd.get("schema_name") == "DoclingDocument"
+    assert len(sd.get("texts", [])) >= 2  # structure (heading + intro + …) preserved
+    assert len(sd.get("tables", [])) == 1  # the table structure survived (cells from the text layer)

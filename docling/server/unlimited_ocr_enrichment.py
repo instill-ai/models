@@ -21,6 +21,8 @@ artifacts (`Ġ`=space, `Ċ`=newline). So we do NOT crop per element. Instead:
 from __future__ import annotations
 
 import io
+import logging
+import os
 import re
 from collections.abc import Callable
 from html.parser import HTMLParser
@@ -42,10 +44,47 @@ from docling_core.types.doc import (
     TextItem,
 )
 
+logger = logging.getLogger(__name__)
+
 OcrRaw = Callable[[Image.Image], str]
 
 # A grounded region: (label, (l, t, r, b) normalized 0..1 top-left, text).
 Region = Tuple[str, Tuple[float, float, float, float], str]
+
+# ── digital-text fast path ─────────────────────────────────────────────────────────────────────
+# The MLX OCR forward pass is ~93% of conversion wall-clock (autoregressive decode, sequential on
+# one Metal GPU) and on dense pages it runs to the token cap — sometimes looping. But Docling's
+# layout pass already runs with do_ocr=False, which extracts the PDF's EMBEDDED (digital) text
+# layer for free (CPU) and exactly. For a digital PDF that text is ground truth — better than OCR,
+# which can hallucinate/loop — so re-OCR'ing those pages is pure waste. A scanned/image page yields
+# ~0 embedded chars; a digital page carries hundreds–thousands. So a simple per-page character
+# floor cleanly separates them: pages above the floor keep Docling's exact text and SKIP OCR; only
+# pages below it (scanned, or a near-empty text layer) get the MLX OCR pass. Tables (cell text from
+# the layer), figures (PICTURE leaves → downstream VLM describe) and captions are untouched, so the
+# visual-leaf / TYPE_VISUAL path is preserved. Tunable + killswitch via env for safe A/B in deploy.
+_DIGITAL_FASTPATH = (
+    os.environ.get("SHUBO_DOCLING_DIGITAL_TEXT_FASTPATH", "1").strip().lower()
+    not in ("0", "false", "no", "off")
+)
+_MIN_DIGITAL_TEXT_CHARS = int(os.environ.get("SHUBO_DOCLING_MIN_DIGITAL_CHARS", "100"))
+
+
+def _digital_text_chars_by_page(doc: DoclingDocument) -> dict:
+    """Per-page count of Docling's embedded-text-layer characters (TextItem text + table cell text),
+    the signal for the digital-text fast path. Scanned pages ≈ 0; digital pages ≫ the floor."""
+    chars: dict = {}
+    for item, _ in doc.iterate_items():
+        prov = getattr(item, "prov", None)
+        if not prov:
+            continue
+        page_no = prov[0].page_no
+        if isinstance(item, TextItem):
+            chars[page_no] = chars.get(page_no, 0) + len((item.text or "").strip())
+        elif isinstance(item, TableItem):
+            chars[page_no] = chars.get(page_no, 0) + sum(
+                len((getattr(c, "text", "") or "").strip()) for c in item.data.table_cells
+            )
+    return chars
 
 
 # ── byte-BPE decode ──────────────────────────────────────────────────────────────────────────
@@ -333,17 +372,30 @@ def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
     doc: DoclingDocument = _structure_converter().convert(src).document
 
     # OCR each page exactly once (Unlimited-OCR is full-page); cache the grounded regions.
+    # Digital-text fast path: skip the (expensive, GPU-bound) OCR for any page whose embedded text
+    # layer already covers it — Docling's extracted text is exact and free, so those pages keep it
+    # and are simply absent from page_data (the mapping below is a no-op for them). Scanned / empty
+    # -layer pages fall through to OCR exactly as before.
+    digital_chars = _digital_text_chars_by_page(doc) if _DIGITAL_FASTPATH else {}
     page_data: dict = {}
+    skipped_digital = 0
     for page_no in sorted(doc.pages):
         page = doc.pages[page_no]
         img = page.image.pil_image if (page.image is not None) else None
         if img is None or page.size is None:
             continue
+        if _DIGITAL_FASTPATH and digital_chars.get(page_no, 0) >= _MIN_DIGITAL_TEXT_CHARS:
+            skipped_digital += 1
+            continue  # usable digital text layer → keep Docling's exact text, skip MLX OCR
         page_data[page_no] = (
             parse_grounded_regions(ocr_raw(img)),
             float(page.size.width),
             float(page.size.height),
         )
+    logger.debug(
+        "digital-text fast path: %d/%d page(s) used the embedded layer (OCR skipped); %d OCR'd",
+        skipped_digital, len(doc.pages), len(page_data),
+    )
 
     # Does Docling's layout carry usable structure? Digital PDFs: yes. Image-only PDFs: no text
     # elements and empty tables (layout needs embedded text / a working OCR) → build from the

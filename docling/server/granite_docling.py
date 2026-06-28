@@ -19,6 +19,14 @@ from PIL import Image
 DEFAULT_MODEL = os.environ.get("SHUBO_DOCLING_MODEL", "sahilchachra/unlimited-ocr-mxfp8-mlx")
 DEFAULT_MAX_TOKENS = int(os.environ.get("SHUBO_DOCLING_MAX_TOKENS", "4096"))
 DEFAULT_PDF_DPI = int(os.environ.get("SHUBO_DOCLING_PDF_DPI", "150"))
+# Greedy decoding (temperature=0.0) on dense pages — references, code, tables — makes Unlimited-OCR
+# LOOP, repeating a line until it hits DEFAULT_MAX_TOKENS (~20s of wasted decode per stuck page,
+# observed on the references page of large papers). A mild repetition penalty over a short recent
+# window breaks those tight loops while leaving normal OCR output essentially unchanged; the window
+# is kept small so legitimately repeated short tokens (table digits, recurring headers) far apart on
+# the page are not penalized. 1.0 / 0 disables either. Tunable via env for accuracy A/B in deploy.
+DEFAULT_REPETITION_PENALTY = float(os.environ.get("SHUBO_DOCLING_REPETITION_PENALTY", "1.08"))
+DEFAULT_REPETITION_CONTEXT = int(os.environ.get("SHUBO_DOCLING_REPETITION_CONTEXT", "40"))
 GRANITE_PROMPT = "Convert this page to docling."
 UNLIMITED_OCR_PROMPT = "<image>document parsing."
 
@@ -152,8 +160,14 @@ class GraniteDocling:
                 prompt = apply_chat_template(self._processor, self._config, prompt, num_images=1)
             except Exception:
                 pass
-        out = generate(self._model, self._processor, prompt, image=[pil],
-                       max_tokens=self.max_tokens, temperature=0.0, verbose=False)
+        gen_kwargs = dict(max_tokens=self.max_tokens, temperature=0.0, verbose=False)
+        # Break the greedy-decode loops on dense pages (kwargs forwarded to mlx_vlm generate_step,
+        # which accepts repetition_penalty / repetition_context_size). Keep temperature=0.0.
+        if DEFAULT_REPETITION_PENALTY and DEFAULT_REPETITION_PENALTY != 1.0:
+            gen_kwargs["repetition_penalty"] = DEFAULT_REPETITION_PENALTY
+            if DEFAULT_REPETITION_CONTEXT > 0:
+                gen_kwargs["repetition_context_size"] = DEFAULT_REPETITION_CONTEXT
+        out = generate(self._model, self._processor, prompt, image=[pil], **gen_kwargs)
         return out.text if hasattr(out, "text") else str(out)
 
     def convert(self, images: list) -> dict:
