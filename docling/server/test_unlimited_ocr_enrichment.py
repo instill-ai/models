@@ -294,3 +294,111 @@ def test_digital_text_fast_path_skips_ocr_for_digital_pdf(tmp_path, monkeypatch)
     assert sd.get("schema_name") == "DoclingDocument"
     assert len(sd.get("texts", [])) >= 2  # structure (heading + intro + …) preserved
     assert len(sd.get("tables", [])) == 1  # the table structure survived (cells from the text layer)
+
+
+# ── OCR-recovery: unmapped-region pass (scanned / under-segmented pages) ───────────────────────
+# These exercise the recovery branch in convert_to_contract's structured (else) path. They use the
+# digital test PDF, so the digital-text fast path is disabled — otherwise OCR is skipped and the
+# page is absent from page_data (the recovery is correctly a no-op for digital fast-path pages,
+# which is the composition guarantee; here we want the OCR'd-page behaviour).
+def test_unmapped_ocr_region_is_recovered_as_text_node(tmp_path, monkeypatch):
+    # An OCR region in an area Docling's layout left empty (no element) must be recovered as its own
+    # text node instead of silently dropped — the fix for author columns the layout under-segments.
+    monkeypatch.setattr("unlimited_ocr_enrichment._DIGITAL_FASTPATH", False)
+    pdf_path = str(tmp_path / "doc.pdf")
+    _make_pdf(pdf_path)
+    with open(pdf_path, "rb") as fh:
+        pdf_bytes = fh.read()
+
+    # One region maps onto the heading; a second sits low on the page where the short test PDF has
+    # no text element at all → no Docling element to map onto.
+    raw = (
+        _grounded("title", 30, 0, 970, 85, "1. BACKGROUND (ocr)")
+        + _grounded("text", 50, 700, 950, 740, "Recovered Author kraska@example.edu")
+    )
+
+    out = convert_to_contract(pdf_bytes, lambda _img: raw)
+    full_md = "\n".join(out["markdown_pages"])
+    assert "Recovered Author kraska@example.edu" in full_md
+    # No duplication: the recovered text appears exactly once.
+    assert full_md.count("Recovered Author kraska@example.edu") == 1
+
+
+def test_recovery_does_not_duplicate_a_mapped_region(tmp_path, monkeypatch):
+    # A region that maps onto an existing Docling element is consumed in the first pass; the recovery
+    # pass must add NOTHING for it (no duplicate node). Recovered nodes are created with TOPLEFT
+    # provenance, whereas mapped Docling elements keep the layout's own (BOTTOMLEFT) provenance — so a
+    # recovered duplicate is identifiable regardless of how Docling segments the page.
+    monkeypatch.setattr("unlimited_ocr_enrichment._DIGITAL_FASTPATH", False)
+    pdf_path = str(tmp_path / "doc.pdf")
+    _make_pdf(pdf_path)
+    with open(pdf_path, "rb") as fh:
+        pdf_bytes = fh.read()
+
+    raw = _grounded("title", 30, 0, 970, 85, "1. BACKGROUND (ocr)")  # maps onto Docling's heading
+
+    out = convert_to_contract(pdf_bytes, lambda _img: raw)
+    sd = out["structured_document"]
+    recovered_texts = [
+        t["text"]
+        for t in sd["texts"]
+        if t["prov"] and t["prov"][0]["bbox"].get("coord_origin") == "TOPLEFT"
+    ]
+    # The heading region mapped onto an element → it must NOT also appear as a recovered node.
+    assert "1. BACKGROUND (ocr)" not in recovered_texts
+
+
+def test_recovery_skips_degenerate_and_placeholder_regions(tmp_path, monkeypatch):
+    # The OCR model loops, emitting zero-area boxes and bracketed placeholders in empty page space;
+    # those must NOT become recovered nodes (no garbage), while a genuine unmapped line is kept.
+    monkeypatch.setattr("unlimited_ocr_enrichment._DIGITAL_FASTPATH", False)
+    pdf_path = str(tmp_path / "doc.pdf")
+    _make_pdf(pdf_path)
+    with open(pdf_path, "rb") as fh:
+        pdf_bytes = fh.read()
+
+    raw = (
+        _grounded("title", 30, 0, 970, 85, "1. BACKGROUND (ocr)")
+        + _grounded("text", 50, 700, 950, 740, "Genuine recovered line")  # placeable → kept
+        + _grounded("ref_text", 171, 930, 826, 930, "Looped zero height junk")  # zero height
+        + _grounded("text", 0, 0, 3, 3, "Tiny corner junk")  # below min dim
+        + _grounded("text", 50, 760, 950, 800, "[Non-Text]")  # placeholder marker
+    )
+
+    out = convert_to_contract(pdf_bytes, lambda _img: raw)
+    full_md = "\n".join(out["markdown_pages"])
+    assert "Genuine recovered line" in full_md
+    assert "Looped zero height junk" not in full_md
+    assert "Tiny corner junk" not in full_md
+    assert "[Non-Text]" not in full_md
+
+
+def test_recovery_skips_region_overlapping_detected_formula(tmp_path, monkeypatch):
+    # A region whose centre sits inside a Docling-DETECTED formula box (CodeFormula already rendered
+    # it to LaTeX) is the garbled OCR of that same math → it must be SKIPPED, not recovered as a
+    # duplicate raw-text node. A genuine unmapped line elsewhere is still recovered. We stub
+    # _enrich_formulas to inject a formula box without needing the GPU model or a real formula PDF.
+    monkeypatch.setattr("unlimited_ocr_enrichment._DIGITAL_FASTPATH", False)
+    fbox = (0.05, 0.70, 0.95, 0.74)  # normalized 0..1 formula box, low on the (empty) page body
+    monkeypatch.setattr(
+        "unlimited_ocr_enrichment._enrich_formulas",
+        lambda _doc: {1: [(fbox, r"E = mc^{2}")]},
+    )
+    pdf_path = str(tmp_path / "doc.pdf")
+    _make_pdf(pdf_path)
+    with open(pdf_path, "rb") as fh:
+        pdf_bytes = fh.read()
+
+    # The garbled-formula region's centre (≈0.50, 0.72) lies inside fbox; the footnote (≈0.86) does
+    # not. Both are in empty page space (no Docling element), so absent the formula guard BOTH would
+    # be recovered — the assertion proves only the formula-overlapping one is suppressed.
+    raw = (
+        _grounded("title", 30, 0, 970, 85, "1. BACKGROUND (ocr)")
+        + _grounded("text", 50, 710, 950, 730, "E equals m c squared garbled ocr")
+        + _grounded("text", 50, 850, 950, 880, "Genuine recovered footnote line")
+    )
+
+    out = convert_to_contract(pdf_bytes, lambda _img: raw)
+    full_md = "\n".join(out["markdown_pages"])
+    assert "Genuine recovered footnote line" in full_md  # genuine unmapped region recovered
+    assert "E equals m c squared garbled ocr" not in full_md  # formula transcription suppressed

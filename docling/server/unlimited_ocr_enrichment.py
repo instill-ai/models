@@ -293,6 +293,11 @@ _NON_TEXT_LABELS = {
 _HEADER_BAND = 0.07
 _FOOTER_BAND = 0.93
 
+# Recovery-pass guards (see convert_to_contract). The OCR model occasionally loops, emitting many
+# degenerate (zero/near-zero area) or placeholder regions; those must NOT become recovered nodes.
+_MIN_REGION_DIM = 0.004  # a recoverable region must span >0.4% of the page in BOTH dimensions
+_PLACEHOLDER_RE = re.compile(r"^\[(?:non[-\s]?text|image|figure|photo|graphic|table|chart)\]$", re.I)
+
 
 def _resolve_label(label: str, box: Tuple[float, float, float, float]) -> DocItemLabel:
     key = (label or "").lower().strip()
@@ -619,27 +624,84 @@ def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
         _inject_formulas(page_data, formula_regions)
         doc = _build_doc_from_grounded(page_data)
     else:
+        # First pass: map each OCR region onto Docling's existing layout elements. Track which
+        # regions get consumed and collect each element's box (per page) so the recovery pass below
+        # can tell which regions matched no element.
+        consumed: set[int] = set()
+        elem_boxes: dict[int, List[Tuple[float, float, float, float]]] = {}
         for item, _ in doc.iterate_items():
             prov = getattr(item, "prov", None)
             if not prov or prov[0].page_no not in page_data:
                 continue
-            regions, pw, ph = page_data[prov[0].page_no]
+            page_no = prov[0].page_no
+            regions, pw, ph = page_data[page_no]
             box = _norm_tl(prov[0].bbox, pw, ph)
+            elem_boxes.setdefault(page_no, []).append(box)
             if isinstance(item, TableItem):
                 treg = _best_region(box, [r for r in regions if r[0] == "table"]) or _best_region(
                     box, regions
                 )
                 if treg:
                     _fill_table_from_html(item, treg[2])
+                    consumed.add(id(treg))
             elif isinstance(item, TextItem):
                 # Keep CodeFormula's LaTeX on formula leaves — never overwrite it with the (garbled)
-                # full-page-OCR text that overlaps the formula region.
+                # full-page-OCR text that overlaps the formula region. The formula leaf's box is still
+                # recorded in elem_boxes above, so the recovery pass treats it like any other element.
                 if item.label == DocItemLabel.FORMULA:
                     continue
                 reg = _best_region(box, [r for r in regions if r[0] != "table"])
                 if reg and reg[2]:
                     item.text = reg[2]
                     item.orig = reg[2]
+                    consumed.add(id(reg))
+
+        # Second pass: recover regions Docling's layout under-segmented. Full-page OCR sometimes
+        # finds text that maps to NO Docling element (its centre lies in no element box and its IoU
+        # with every element is below the floor), so the first pass dropped it (e.g. an author column
+        # the layout model failed to detect). Emit a text node for each so the content isn't silently
+        # lost, skipping degenerate/placeholder regions the OCR emits when it loops. This branch only
+        # runs for OCR'd pages (those in page_data); digital fast-path pages are absent → no-op.
+        recovered = 0
+        for page_no in sorted(page_data):
+            regions, pw, ph = page_data[page_no]
+            boxes = elem_boxes.get(page_no, [])
+            # Boxes of formulas Docling DETECTED and CodeFormula rendered to LaTeX (kept on their
+            # leaves in this structured path). A region transcribing one of these is the garbled OCR
+            # of math we already have as LaTeX → skip it so we don't emit a duplicate raw-text node.
+            # A formula Docling MISSED has no such box, so its region is still recovered below.
+            fboxes = [b for b, _ in formula_regions.get(page_no, [])]
+            for reg in regions:
+                label, box, text = reg
+                if id(reg) in consumed or label == "table" or not text:
+                    continue
+                if _PLACEHOLDER_RE.match(text.strip()):
+                    continue
+                if box[2] - box[0] < _MIN_REGION_DIM or box[3] - box[1] < _MIN_REGION_DIM:
+                    continue  # zero/near-zero area → an OCR loop artifact, not placeable content
+                resolved = _resolve_label(label, box)
+                if resolved in _NON_TEXT_LABELS or resolved == DocItemLabel.PICTURE:
+                    continue
+                cx, cy = (box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0
+                in_element = any(
+                    eb[0] - 1e-6 <= cx <= eb[2] + 1e-6 and eb[1] - 1e-6 <= cy <= eb[3] + 1e-6
+                    for eb in boxes
+                )
+                if in_element or any(_iou(box, eb) >= 0.1 for eb in boxes):
+                    continue
+                if _center_in_any(box, fboxes):
+                    continue  # overlaps a detected formula → CodeFormula LaTeX already carries it
+                prov = ProvenanceItem(
+                    page_no=page_no,
+                    bbox=BoundingBox(
+                        l=box[0] * pw, t=box[1] * ph, r=box[2] * pw, b=box[3] * ph,
+                        coord_origin=CoordOrigin.TOPLEFT,
+                    ),
+                    charspan=(0, len(text)),
+                )
+                doc.add_text(label=resolved, text=text, orig=text, prov=prov)
+                recovered += 1
+        logger.debug("recovered %d unmapped OCR region(s) from full-page OCR", recovered)
 
     # Correct any body line Docling's layout mislabeled as page furniture — runs on the FINAL doc so
     # it covers both the grounded rebuild and the digital/structured path (which keeps layout labels
