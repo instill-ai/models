@@ -607,6 +607,40 @@ def _crop_formula_region(
     return pil_image.crop(px), (l, t, r, b)
 
 
+# A single-formula crop is one equation, but CodeFormula's greedy decode (temperature 0) sometimes
+# LOOPS — re-emitting the equation as a second `align` row with the SAME left-hand side (often via a
+# junk \intertext), and the repeat is frequently corrupted (e.g. LC/8 → 1/8). Drop such repeated rows.
+_INTERTEXT_RE = re.compile(r"\\intertext\s*\{[^}]*\}")
+
+
+def _dedup_formula_latex(latex: str) -> str:
+    r"""Collapse a CodeFormula repetition artifact: keep only the FIRST row for each distinct non-empty
+    left-hand side (text before the first `&`). Conservative — genuine multi-row systems have distinct
+    LHSs (or empty-LHS `& = …` continuations), which are preserved; only a row whose non-trivial LHS
+    already appeared is dropped. Junk `\intertext{…}` fragments (the loop's seam) are stripped."""
+    s = (latex or "").strip()
+    if "\\\\" not in s:  # no row separator → single row, nothing to dedup
+        return s
+    rows = s.split("\\\\")
+    kept: list = []
+    seen_lhs: list = []
+    dropped = 0
+    for row in rows:
+        r = _INTERTEXT_RE.sub("", row).strip()
+        if not r:
+            continue
+        lhs = r.split("&", 1)[0].strip()
+        if len(lhs) > 3 and lhs in seen_lhs:
+            dropped += 1  # a re-emission of an already-seen equation — the looped duplicate
+            continue
+        if lhs:
+            seen_lhs.append(lhs)
+        kept.append(r)
+    if dropped == 0 or not kept:
+        return s  # no duplicate row removed → leave the original untouched (incl. spacing)
+    return " \\\\ ".join(kept)
+
+
 def _enrich_formulas(doc: DoclingDocument) -> dict:
     """Replace every FORMULA leaf's text with deterministic CodeFormula LaTeX (better than OCR/VLM for
     math). Mutates `doc` in place AND returns {page_no: [(box_tl_norm, latex)]} so the image-only
@@ -666,7 +700,8 @@ def _enrich_formulas(doc: DoclingDocument) -> dict:
             break
         done += len(elements[i:i + _FORMULA_BATCH])
     for it, page_no, box in meta[:done]:
-        latex = (it.text or "").strip()
+        latex = _dedup_formula_latex((it.text or "").strip())
+        it.text = latex  # persist the de-looped LaTeX on the node, not just the harvested copy
         if latex:
             harvested.setdefault(page_no, []).append((box, latex))
     logger.debug("formula enrichment: %d/%d formula leaf/leaves → LaTeX", done, total)
