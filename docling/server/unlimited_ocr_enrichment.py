@@ -979,8 +979,14 @@ def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
     # Hybrid-page reconcile: pages classified digital that ALSO carry a garbled embedded span (e.g. a
     # handwritten date an upstream tool OCR'd into the text layer as garbage). Those are NOT skipped —
     # they get the whole-page OCR so the garbled span(s) can be replaced, while clean spans are kept.
+    # GATED on image_backed: only a SCANNED page can have an OCR-mangled embedded span worth fixing; a
+    # BORN-DIGITAL page's text layer is ground truth (never reconcile it). Without this gate the garble
+    # heuristic false-positives on dense math/notation (single-char vars, spaced symbols, "( x 1 , ...")
+    # in a digital paper and needlessly OCRs most pages — the 13-page-paper slowdown.
     garbled_pages = (
-        _pages_with_garbled_spans(doc) if (_DIGITAL_FASTPATH and _RECONCILE_GARBLED) else set()
+        {p for p in _pages_with_garbled_spans(doc) if p in image_backed}
+        if (_DIGITAL_FASTPATH and _RECONCILE_GARBLED)
+        else set()
     )
     page_data: dict = {}
     reconcile_pages: set = set()  # digital pages OCR'd ONLY to fix garbled spans (clean spans kept)

@@ -459,11 +459,21 @@ def test_digital_text_fast_path_skips_ocr_for_digital_pdf(tmp_path, monkeypatch)
 
 
 # ── hybrid-page reconcile: a clean digital page carrying one garbled embedded span ─────────────
-def _make_hybrid_pdf(path: str, lines) -> None:
-    # A clean digital PDF whose embedded text layer is written at known vertical positions (mm on an
-    # A4 page) so the mock OCR's grounded bands can be aimed at each line's center.
+def _make_hybrid_pdf(path: str, lines, image_backed: bool = False) -> None:
+    # A PDF whose embedded text layer is written at known vertical positions (mm on an A4 page) so the
+    # mock OCR's grounded bands can be aimed at each line's center. When `image_backed`, a full-page
+    # raster image is laid under the text — a real DocuSign hybrid page is a SCANNED image with a text
+    # layer over it, which is exactly what the garbled-span reconcile is now gated on.
     pdf = fpdf.FPDF()  # A4 portrait, units mm → page is 210 x 297 mm
     pdf.add_page()
+    if image_backed:
+        import io
+
+        from PIL import Image
+
+        buf = io.BytesIO()
+        Image.new("RGB", (1240, 1754), "white").save(buf, format="PNG")
+        pdf.image(buf, x=0, y=0, w=210, h=297)
     pdf.set_font("Helvetica", size=14)
     for y_mm, text in lines:
         pdf.set_xy(15.0, y_mm)
@@ -489,6 +499,7 @@ def test_hybrid_page_reconciles_garbled_span_keeps_clean_digital_text(tmp_path, 
             (100.0, "DocuSign Envelope ID: A7E30573-7EC3-4F1A-9C2D-1234567890AB"),  # center ~0.350
             (160.0, "Dated:  I 2- D e lo cf.,r  Zo  ZZ"),                         # center ~0.552 GARBLED
         ],
+        image_backed=True,  # a real hybrid (DocuSign) page is a scanned image + text layer
     )
     with open(pdf_path, "rb") as fh:
         pdf_bytes = fh.read()
@@ -520,6 +531,36 @@ def test_hybrid_page_reconciles_garbled_span_keeps_clean_digital_text(tmp_path, 
     assert "A7E30573-7EC3-4F1A-9C2D-1234567890AB" in full_md
     assert "WRONG OCR NAME" not in full_md
     assert "WRONG OCR ID" not in full_md
+
+
+def test_digital_math_page_garble_false_positive_does_not_ocr(tmp_path, monkeypatch):
+    # Regression: a BORN-DIGITAL page (no image) whose dense math notation the garble heuristic
+    # FALSE-POSITIVES on (single-char vars, spaced symbols, "( x 1 , . . . , x n )") must NOT be
+    # reconcile-OCR'd — its embedded text layer is ground truth. Reconcile is gated on image_backed,
+    # so a digital page is never OCR'd no matter what the heuristic thinks (the 13-page-paper slowdown).
+    monkeypatch.setattr("unlimited_ocr_enrichment._DIGITAL_FASTPATH", True)
+    monkeypatch.setattr("unlimited_ocr_enrichment._RECONCILE_GARBLED", True)
+    monkeypatch.setattr("unlimited_ocr_enrichment._MIN_DIGITAL_TEXT_CHARS", 10)
+    # The heuristic DOES flag this math span — so the image_backed gate is what protects it.
+    assert _is_garbled_text("Let X = ( x 1 , . . . , x n ) be a sequence with statistic T ( X )")
+
+    pdf_path = str(tmp_path / "math.pdf")
+    _make_hybrid_pdf(  # image_backed=False (default) → a digital page
+        pdf_path,
+        [
+            (20.0, "1. BACKGROUND"),
+            (60.0, "Let X = ( x 1 , . . . , x n ) be a sequence with statistic T ( X )"),
+            (100.0, "where psi is ( a , C ) -regular : | psi ( r +1) -psi ( r ) | <= C/r a ."),
+        ],
+    )
+    calls = {"n": 0}
+
+    def ocr_raw(_image):
+        calls["n"] += 1
+        return ""
+
+    convert_to_contract(open(pdf_path, "rb").read(), ocr_raw)
+    assert calls["n"] == 0  # digital page → reconcile gated off → zero OCR
 
 
 def test_clean_digital_page_does_not_trigger_reconcile_ocr(tmp_path, monkeypatch):
