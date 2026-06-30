@@ -766,25 +766,19 @@ def test_enrich_formulas_caps_count_and_respects_time_budget(monkeypatch):
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
 
-@pytest.mark.xfail(
-    reason="KNOWN BUG: Docling's PDF reading-order MERGES the 3-column author block — "
-    "'Tim Kraska MIT CSAIL kraska@mit.edu' is concatenated into the LEFT author's node with a "
-    "left-column bbox, so the middle author gets no box (the dashboard regression). Fixing it needs "
-    "region-aware multi-column re-segmentation, not a heuristic. Remove this xfail when the fix lands.",
-    strict=False,
-)
 def test_multicolumn_author_block_each_author_grounded_in_its_own_column():
     # Real arxiv page 1 (2512.24601v1, images stripped to keep the fixture small). The 3-column
     # author row — Alex L. Zhang | Tim Kraska | Omar Khattab — must yield separate text nodes, each
     # grounded in its OWN column. This is the regression guard that the synthetic in-memory tests
     # cannot provide: it runs a REAL multi-column PDF through the actual Docling structure converter.
-    from unlimited_ocr_enrichment import _structure_converter
+    # Docling's raw reading-order MERGES the middle author into the left node; _resegment_overflow_nodes
+    # (run inside convert_to_contract) repairs it from PyMuPDF line geometry — applied here directly.
+    from unlimited_ocr_enrichment import _resegment_overflow_nodes, _structure_converter
 
-    doc = (
-        _structure_converter()
-        .convert(os.path.join(_HERE, "testdata", "arxiv_authorblock_p1.pdf"))
-        .document
-    )
+    path = os.path.join(_HERE, "testdata", "arxiv_authorblock_p1.pdf")
+    doc = _structure_converter().convert(path).document
+    with open(path, "rb") as fh:
+        _resegment_overflow_nodes(doc, fh.read())
     p1 = [it for it in doc.texts if it.prov and it.prov[0].page_no == 1]
 
     # A clean middle-author node carries Tim Kraska's email but NOT the left author's (no merge),
