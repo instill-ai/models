@@ -16,8 +16,22 @@ from unlimited_ocr_enrichment import (
     _enrich_formulas,
     _html_to_grid,
     _inject_formulas,
+    _is_garbled_text,
     _resolve_label,
 )
+
+
+def test_garble_detector_flags_ocr_cursive_not_clean_text_or_ids():
+    # Tuned against real DocuSign-page spans. The handwritten date an upstream tool glyph-split into
+    # the text layer is garbled; clean digital prose and a long no-space alphanumeric ID are NOT.
+    assert _is_garbled_text("Dated:  I 2- D e lo cf.,r  Zo  ZZ") is True
+    assert _is_garbled_text("Name of Director: Ping-Lin Chang") is False
+    # A long alphanumeric ID must never be flagged (it is a single, clearly-good token).
+    assert _is_garbled_text("DocuSign Envelope ID: A7E30573-7EC3-4F1A-9C2D-1234567890AB") is False
+    assert _is_garbled_text("The Director approves the proposed investment.") is False
+    assert _is_garbled_text("") is False
+    # Too few tokens to judge → never flagged (protects short clean labels).
+    assert _is_garbled_text("I 2 D") is False
 
 
 def test_resolve_label_covers_full_doctags_vocabulary_and_furniture():
@@ -294,6 +308,104 @@ def test_digital_text_fast_path_skips_ocr_for_digital_pdf(tmp_path, monkeypatch)
     assert sd.get("schema_name") == "DoclingDocument"
     assert len(sd.get("texts", [])) >= 2  # structure (heading + intro + …) preserved
     assert len(sd.get("tables", [])) == 1  # the table structure survived (cells from the text layer)
+
+
+# ── hybrid-page reconcile: a clean digital page carrying one garbled embedded span ─────────────
+def _make_hybrid_pdf(path: str, lines) -> None:
+    # A clean digital PDF whose embedded text layer is written at known vertical positions (mm on an
+    # A4 page) so the mock OCR's grounded bands can be aimed at each line's center.
+    pdf = fpdf.FPDF()  # A4 portrait, units mm → page is 210 x 297 mm
+    pdf.add_page()
+    pdf.set_font("Helvetica", size=14)
+    for y_mm, text in lines:
+        pdf.set_xy(15.0, y_mm)
+        pdf.cell(0, 8, text)
+    pdf.output(path)
+
+
+def test_hybrid_page_reconciles_garbled_span_keeps_clean_digital_text(tmp_path, monkeypatch):
+    # The core bug: a digital page (DocuSign-style) sails over the char floor but carries ONE garbled
+    # embedded span (a handwritten date an upstream tool glyph-split). The fast path must NOT blindly
+    # trust it: it OCR's the page and replaces ONLY the garbled element with the whole-page OCR text,
+    # while keeping every clean digital element (prose + the long alphanumeric ID) verbatim.
+    monkeypatch.setattr("unlimited_ocr_enrichment._DIGITAL_FASTPATH", True)
+    monkeypatch.setattr("unlimited_ocr_enrichment._RECONCILE_GARBLED", True)
+    monkeypatch.setattr("unlimited_ocr_enrichment._MIN_DIGITAL_TEXT_CHARS", 10)
+
+    pdf_path = str(tmp_path / "hybrid.pdf")
+    _make_hybrid_pdf(
+        pdf_path,
+        [
+            (20.0, "1. BACKGROUND"),                                              # center ~0.081
+            (60.0, "Name of Director: Ping-Lin Chang"),                           # center ~0.215
+            (100.0, "DocuSign Envelope ID: A7E30573-7EC3-4F1A-9C2D-1234567890AB"),  # center ~0.350
+            (160.0, "Dated:  I 2- D e lo cf.,r  Zo  ZZ"),                         # center ~0.552 GARBLED
+        ],
+    )
+    with open(pdf_path, "rb") as fh:
+        pdf_bytes = fh.read()
+
+    # Whole-page OCR: a band over each line. The clean lines carry DELIBERATELY WRONG text — if the
+    # reconcile mistakenly overwrote a clean element, the wrong text would leak into the output.
+    raw = (
+        _grounded("title", 30, 40, 970, 120, "1. BACKGROUND")
+        + _grounded("text", 30, 180, 970, 260, "WRONG OCR NAME")
+        + _grounded("text", 30, 310, 970, 390, "WRONG OCR ID")
+        + _grounded("text", 30, 510, 970, 600, "Dated: 12 December 2022")  # corrects the garbled span
+    )
+    calls = {"n": 0}
+
+    def ocr_raw(_image):
+        calls["n"] += 1
+        return raw
+
+    out = convert_to_contract(pdf_bytes, ocr_raw)
+    full_md = "\n".join(out["markdown_pages"])
+
+    # The page WAS OCR'd (it has a garbled span) — exactly once, whole-page.
+    assert calls["n"] == 1
+    # Garbled span replaced by the correct OCR reading.
+    assert "Dated: 12 December 2022" in full_md
+    assert "Zo  ZZ" not in full_md and "cf.,r" not in full_md
+    # Clean digital elements kept verbatim — NOT overwritten with the wrong OCR text.
+    assert "Ping-Lin Chang" in full_md
+    assert "A7E30573-7EC3-4F1A-9C2D-1234567890AB" in full_md
+    assert "WRONG OCR NAME" not in full_md
+    assert "WRONG OCR ID" not in full_md
+
+
+def test_clean_digital_page_does_not_trigger_reconcile_ocr(tmp_path, monkeypatch):
+    # A fully-clean digital page (no garbled span) must keep the zero-cost fast path: the MLX OCR is
+    # NEVER called, even with reconcile enabled.
+    monkeypatch.setattr("unlimited_ocr_enrichment._DIGITAL_FASTPATH", True)
+    monkeypatch.setattr("unlimited_ocr_enrichment._RECONCILE_GARBLED", True)
+    monkeypatch.setattr("unlimited_ocr_enrichment._MIN_DIGITAL_TEXT_CHARS", 10)
+
+    pdf_path = str(tmp_path / "clean.pdf")
+    _make_hybrid_pdf(
+        pdf_path,
+        [
+            (20.0, "1. BACKGROUND"),
+            (60.0, "Name of Director: Ping-Lin Chang"),
+            (100.0, "DocuSign Envelope ID: A7E30573-7EC3-4F1A-9C2D-1234567890AB"),
+            (160.0, "The Director approves the proposed investment on the stated terms."),
+        ],
+    )
+    with open(pdf_path, "rb") as fh:
+        pdf_bytes = fh.read()
+
+    calls = {"n": 0}
+
+    def ocr_raw(_image):
+        calls["n"] += 1
+        return "SHOULD NOT BE CALLED"
+
+    out = convert_to_contract(pdf_bytes, ocr_raw)
+    full_md = "\n".join(out["markdown_pages"])
+
+    assert calls["n"] == 0  # clean page → no OCR pass at all
+    assert "Ping-Lin Chang" in full_md
+    assert "SHOULD NOT BE CALLED" not in full_md
 
 
 # ── OCR-recovery: unmapped-region pass (scanned / under-segmented pages) ───────────────────────
