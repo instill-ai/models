@@ -25,6 +25,7 @@ import logging
 import os
 import re
 import string
+import time
 from collections.abc import Callable
 from html.parser import HTMLParser
 from typing import List, Optional, Tuple, Union
@@ -203,6 +204,13 @@ _FORMULA_ENRICHMENT = (
     os.environ.get("SHUBO_DOCLING_FORMULA_ENRICHMENT", "1").strip().lower()
     not in ("0", "false", "no", "off")
 )
+# CodeFormula is a VLM (one LaTeX generation per formula crop) on the SHARED Metal GPU, so a
+# formula-DENSE paper (hundreds of equations) can dominate a conversion. Bound it: enrich at most
+# _FORMULA_MAX_LEAVES formulas, in sub-batches of _FORMULA_BATCH, stopping once _FORMULA_TIME_BUDGET_S
+# is exceeded. Excess formulas keep their embedded-layer text (digital) or OCR text (scanned). Tunable.
+_FORMULA_MAX_LEAVES = int(os.environ.get("SHUBO_DOCLING_FORMULA_MAX_LEAVES", "60"))
+_FORMULA_BATCH = max(1, int(os.environ.get("SHUBO_DOCLING_FORMULA_BATCH", "8")))
+_FORMULA_TIME_BUDGET_S = float(os.environ.get("SHUBO_DOCLING_FORMULA_TIME_BUDGET_S", "90"))
 # 18% bbox expansion + the model's own 120-DPI training scale are matched by docling's pipeline; we
 # crop from the page image we already render (images_scale=2.0), expanding the same 18% for margin.
 _FORMULA_BBOX_EXPANSION = 0.18
@@ -615,13 +623,20 @@ def _enrich_formulas(doc: DoclingDocument) -> dict:
                 items.append((it, it.prov[0], page))
     if not items:
         return harvested
+    total = len(items)
+    if total > _FORMULA_MAX_LEAVES:  # formula-dense doc: cap so it can't dominate the conversion
+        logger.warning(
+            "formula-dense doc: %d formula leaves, enriching the first %d (rest keep embedded/OCR text)",
+            total, _FORMULA_MAX_LEAVES,
+        )
+        items = items[:_FORMULA_MAX_LEAVES]
     model = _get_formula_model()
     if model is None:
         return harvested
 
     from docling.datamodel.base_models import ItemAndImageEnrichmentElement
 
-    batch = []
+    elements = []
     meta = []
     for it, prov, page in items:
         crop, box = _crop_formula_region(
@@ -629,20 +644,32 @@ def _enrich_formulas(doc: DoclingDocument) -> dict:
         )
         if crop is None:
             continue
-        batch.append(ItemAndImageEnrichmentElement(item=it, image=crop))
+        elements.append(ItemAndImageEnrichmentElement(item=it, image=crop))
         meta.append((it, prov.page_no, box))
-    if not batch:
+    if not elements:
         return harvested
-    try:
-        list(model(doc, batch))  # mutates each item.text → LaTeX (batched, single GPU pass)
-    except Exception:  # noqa: BLE001
-        logger.exception("CodeFormula enrichment failed; leaving formula text as-is")
-        return harvested
-    for it, page_no, box in meta:
+    # Sub-batch with a wall-clock budget: CodeFormula is one VLM generation per crop on the shared
+    # GPU, so a budget bounds a slow/contended run (the model() call mutates each item.text → LaTeX).
+    start = time.monotonic()
+    done = 0
+    for i in range(0, len(elements), _FORMULA_BATCH):
+        if done and time.monotonic() - start > _FORMULA_TIME_BUDGET_S:
+            logger.warning(
+                "formula enrichment hit the %.0fs budget; %d/%d enriched (rest keep their text)",
+                _FORMULA_TIME_BUDGET_S, done, len(elements),
+            )
+            break
+        try:
+            list(model(doc, elements[i:i + _FORMULA_BATCH]))  # mutates item.text → LaTeX
+        except Exception:  # noqa: BLE001
+            logger.exception("CodeFormula enrichment failed; leaving remaining formula text as-is")
+            break
+        done += len(elements[i:i + _FORMULA_BATCH])
+    for it, page_no, box in meta[:done]:
         latex = (it.text or "").strip()
         if latex:
             harvested.setdefault(page_no, []).append((box, latex))
-    logger.debug("formula enrichment: %d formula leaf/leaves → LaTeX", len(meta))
+    logger.debug("formula enrichment: %d/%d formula leaf/leaves → LaTeX", done, total)
     return harvested
 
 
