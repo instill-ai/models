@@ -69,12 +69,13 @@ _DIGITAL_FASTPATH = (
 )
 _MIN_DIGITAL_TEXT_CHARS = int(os.environ.get("SHUBO_DOCLING_MIN_DIGITAL_CHARS", "100"))
 
-# Whole-page picture fallback for SCANNED / image-dominated pages. Region-level picture detection is
-# unreliable on a scan (the OCR model transcribes a signature/figure as text and the layout model
-# finds no picture cluster), so a page whose NATIVE (pre-OCR) text layer is sparse is captured as one
-# page-level PictureItem. That feeds the page image into the visual-description pipeline (the page is
-# the visual unit on a scan), so signatures/stamps/figures are no longer lost. A page with a richer
-# native text layer is treated as digital — its content is the text — and gets no page picture.
+# Visual-region capture for SCANNED / image-dominated pages. On a scan the OCR model transcribes a
+# signature/figure as text and the layout model finds no picture cluster, so non-text graphics
+# (signatures, stamps, logos, handwriting) are invisible to the visual-description pipeline. We
+# recover them by RESIDUAL-INK detection: on a page whose NATIVE (pre-OCR) text layer is sparse, blank
+# out every detected text/table/picture box on the rendered page image, then box the ink that remains
+# — that residual ink IS the non-text graphic, and its bbox is tight (just the signature, not the
+# whole page). A page with a richer native text layer is treated as digital and is left untouched.
 _PAGE_PICTURE_ENABLED = (
     os.environ.get("SHUBO_DOCLING_PAGE_PICTURE", "1").strip().lower()
     not in ("0", "false", "no", "off")
@@ -82,6 +83,13 @@ _PAGE_PICTURE_ENABLED = (
 _PAGE_PICTURE_MAX_NATIVE_CHARS = int(
     os.environ.get("SHUBO_DOCLING_PAGE_PICTURE_MAX_NATIVE_CHARS", "500")
 )
+# Residual-ink detector tunables (fractions of page unless noted).
+_VIS_INK_THRESHOLD = int(os.environ.get("SHUBO_DOCLING_VIS_INK_THRESHOLD", "160"))  # gray < ⇒ ink
+_VIS_MIN_AREA_FRAC = float(os.environ.get("SHUBO_DOCLING_VIS_MIN_AREA_FRAC", "0.0008"))
+_VIS_MAX_AREA_FRAC = float(os.environ.get("SHUBO_DOCLING_VIS_MAX_AREA_FRAC", "0.40"))
+_VIS_ERASE_PAD_FRAC = float(os.environ.get("SHUBO_DOCLING_VIS_ERASE_PAD_FRAC", "0.012"))
+_VIS_BAND_FRAC = float(os.environ.get("SHUBO_DOCLING_VIS_BAND_FRAC", "0.08"))  # header/footer skip
+_VIS_MIN_DIM_FRAC = float(os.environ.get("SHUBO_DOCLING_VIS_MIN_DIM_FRAC", "0.012"))  # drop thin rules
 
 # ── garbled embedded-span reconcile (hybrid digital + handwriting pages) ─────────────────────────
 # A HYBRID page is a clean, digitally-generated page (e.g. a DocuSign-stamped agreement) that ALSO
@@ -648,39 +656,107 @@ def _inject_formulas(page_data: dict, formula_regions: dict) -> None:
         page_data[page_no] = (kept, pw, ph)
 
 
-def _add_scanned_page_pictures(doc: DoclingDocument, native_chars_by_page: dict) -> int:
-    """Emit a whole-page PictureItem for every image-dominated (scanned) page so its visual content
-    flows into the downstream visual-description pipeline.
+def _detect_visual_regions(gray, erase_rects, page_w_px, page_h_px):
+    """Residual-ink detector. `gray` is a HxW uint8 page render; `erase_rects` are pixel boxes of
+    detected text/table/picture elements to blank out (their ink is already explained). Returns tight
+    pixel boxes `(x0, y0, x1, y1)` of the ink that remains — the non-text graphics on the page.
+
+    Pure + dependency-light (numpy + cv2, both already Docling deps) so it unit-tests on a synthetic
+    array without the OCR weights.
+    """
+    import cv2  # local import: heavy native dep, only needed on scanned pages
+    import numpy as np
+
+    H, W = gray.shape
+    ink = (gray < _VIS_INK_THRESHOLD).astype(np.uint8) * 255
+    band = int(_VIS_BAND_FRAC * H)
+    if band:
+        ink[:band, :] = 0          # header band (page furniture: envelope IDs, titles)
+        ink[H - band:, :] = 0      # footer band
+    pad = int(_VIS_ERASE_PAD_FRAC * W)
+    for (x0, y0, x1, y1) in erase_rects:
+        ink[max(0, int(y0) - pad):min(H, int(y1) + pad),
+            max(0, int(x0) - pad):min(W, int(x1) + pad)] = 0
+    # Close gaps so a multi-stroke graphic (cursive signature) becomes one component.
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 9))
+    closed = cv2.morphologyEx(ink, cv2.MORPH_CLOSE, kernel)
+    n, _, stats, _ = cv2.connectedComponentsWithStats(closed, connectivity=8)
+    page_area = float(W * H)
+    min_dim = _VIS_MIN_DIM_FRAC
+    out = []
+    for i in range(1, n):
+        x, y, w, h, area = (int(v) for v in stats[i])
+        if area < _VIS_MIN_AREA_FRAC * page_area:
+            continue                                  # specks / scan noise
+        if w * h > _VIS_MAX_AREA_FRAC * page_area:
+            continue                                  # page-scale blob, not a discrete graphic
+        if w < min_dim * W and h < min_dim * H:
+            continue                                  # tiny
+        if h < min_dim * H and w > 0.30 * W:
+            continue                                  # long thin rule / underline, not a figure
+        out.append((x, y, x + w, y + h))
+    return out
+
+
+def _element_erase_rects(doc: DoclingDocument, page_no: int, sx: float, sy: float, page_h: float):
+    """Pixel boxes of every detected text/table/picture element on `page_no` (already-explained ink),
+    converting each bbox to TOP-LEFT pixel space regardless of its stored coord origin."""
+    rects = []
+    for item, _ in doc.iterate_items():
+        prov = getattr(item, "prov", None)
+        if not prov or prov[0].page_no != page_no:
+            continue
+        b = prov[0].bbox
+        if getattr(b.coord_origin, "value", b.coord_origin) == CoordOrigin.BOTTOMLEFT.value:
+            top, bot = page_h - max(b.t, b.b), page_h - min(b.t, b.b)
+        else:
+            top, bot = min(b.t, b.b), max(b.t, b.b)
+        rects.append((b.l * sx, top * sy, b.r * sx, bot * sy))
+    return rects
+
+
+def _add_scanned_page_pictures(
+    doc: DoclingDocument, native_chars_by_page: dict, page_images: dict
+) -> int:
+    """For every image-dominated (scanned) page, emit a tight PictureItem per non-text graphic found by
+    residual-ink detection, so signatures/stamps/figures flow into the visual-description pipeline.
 
     A page is image-dominated when its NATIVE (pre-OCR) text layer is sparse
-    (≤ `_PAGE_PICTURE_MAX_NATIVE_CHARS`): on such a page the meaning lives in the pixels (signatures,
-    stamps, figures, handwriting), which no region-level detector reliably finds on a scan. A page that
-    already carries a detected picture (region-level) is left alone — no duplicate whole-page box.
-    Returns the number of page pictures added.
+    (≤ `_PAGE_PICTURE_MAX_NATIVE_CHARS`) — on such a page the meaning lives in the pixels, and the
+    residual ink (everything not already a detected text/table/picture box) is the graphic. Boxes are
+    tight (just the signature, not the whole page). `page_images` maps page_no → PIL image (captured
+    before any grounded rebuild, which drops page images). Returns the number of pictures added.
     """
     if not _PAGE_PICTURE_ENABLED:
         return 0
-    pages_with_picture = {
-        prov.page_no for pic in doc.pictures for prov in (pic.prov or [])
-    }
+    import numpy as np
+
     added = 0
     for page_no, page in doc.pages.items():
-        if page_no in pages_with_picture or page.size is None:
+        if page.size is None:
             continue
         if native_chars_by_page.get(page_no, 0) > _PAGE_PICTURE_MAX_NATIVE_CHARS:
             continue  # rich native text → digital page; its content is the text, not the image
-        doc.add_picture(
-            prov=ProvenanceItem(
-                page_no=page_no,
-                bbox=BoundingBox(
-                    l=0.0, t=0.0,
-                    r=float(page.size.width), b=float(page.size.height),
-                    coord_origin=CoordOrigin.TOPLEFT,
-                ),
-                charspan=(0, 0),
+        pil = page_images.get(page_no)
+        if pil is None:
+            continue
+        gray = np.asarray(pil.convert("L"))
+        H, W = gray.shape
+        pw, ph = float(page.size.width), float(page.size.height)
+        sx, sy = W / pw, H / ph
+        erase = _element_erase_rects(doc, page_no, sx, sy, ph)
+        for (x0, y0, x1, y1) in _detect_visual_regions(gray, erase, W, H):
+            doc.add_picture(
+                prov=ProvenanceItem(
+                    page_no=page_no,
+                    bbox=BoundingBox(
+                        l=x0 / sx, t=y0 / sy, r=x1 / sx, b=y1 / sy,
+                        coord_origin=CoordOrigin.TOPLEFT,
+                    ),
+                    charspan=(0, 0),
+                )
             )
-        )
-        added += 1
+            added += 1
     return added
 
 
@@ -706,6 +782,13 @@ def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
     # grounded rebuild replaces `doc`. Drives both the digital-text fast path and the scanned-page
     # picture fallback (a sparse native layer ⇒ an image-dominated/scanned page).
     native_chars_by_page = _digital_text_chars_by_page(doc)
+    # Page renders, captured here too: the grounded rebuild (`_build_doc_from_grounded`) makes a fresh
+    # doc WITHOUT page images, so the residual-ink picture detector below would otherwise lose them.
+    page_images = {
+        p: pg.image.pil_image
+        for p, pg in doc.pages.items()
+        if pg.image is not None and pg.image.pil_image is not None
+    }
 
     # Formula enrichment: turn every layout-detected FORMULA leaf into deterministic LaTeX. Run on the
     # original layout doc (formula regions + page images exist for BOTH digital and image-only PDFs);
@@ -887,12 +970,12 @@ def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
     # verbatim). Without this, a mislabeled content line is dropped from chunks by furniture chunking.
     _correct_furniture_labels(doc)
 
-    # Scanned/image-dominated pages: capture each as a whole-page PictureItem (region-level picture
-    # detection is unreliable on a scan), so signatures/figures/stamps reach the visual-description
-    # pipeline. Runs on the FINAL doc → covers the grounded rebuild and the digital/structured path.
-    page_pics = _add_scanned_page_pictures(doc, native_chars_by_page)
+    # Scanned/image-dominated pages: box each non-text graphic (signature/stamp/figure) via residual-
+    # ink detection, so it reaches the visual-description pipeline with a TIGHT bbox. Runs on the FINAL
+    # doc → covers the grounded rebuild and the digital/structured path.
+    page_pics = _add_scanned_page_pictures(doc, native_chars_by_page, page_images)
     if page_pics:
-        logger.debug("added %d whole-page picture(s) for scanned/image-dominated page(s)", page_pics)
+        logger.debug("added %d residual-ink picture(s) on scanned/image-dominated page(s)", page_pics)
 
     page_nos = sorted(doc.pages)
     markdown_pages = (
