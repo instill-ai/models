@@ -14,6 +14,7 @@ from unlimited_ocr_enrichment import (
     _detect_visual_regions,
     _image_backed_pages,
     _set_prov_bbox_from_norm,
+    _snap_scanned_geometry,
     _build_doc_from_grounded,
     _center_in_any,
     _correct_furniture_labels,
@@ -191,6 +192,34 @@ def test_set_prov_bbox_from_norm_writes_topleft_page_coords():
     b = item.prov[0].bbox
     assert (b.l, b.t, b.r, b.b) == pytest.approx((0.2 * 595, 0.3 * 842, 0.6 * 595, 0.34 * 842))
     assert str(b.coord_origin).upper().endswith("TOPLEFT")
+
+
+def test_snap_scanned_geometry_aligns_text_and_furniture_to_ocr_regions():
+    # Both a body line AND a top-band furniture line (page_header) must be snapped to their OCR
+    # region bbox on a scanned page — furniture is the case the in-loop snap missed.
+    doc = _build_doc_from_grounded(
+        {1: ([
+            ("text", (0.10, 0.30, 0.50, 0.33), "body line"),
+            ("text", (0.10, 0.02, 0.50, 0.04), "HEADER LINE"),  # top band → page_header
+        ], 595.0, 842.0)}
+    )
+    from docling_core.types.doc import DocItemLabel
+
+    assert any(t.label == DocItemLabel.PAGE_HEADER for t in doc.texts)  # furniture exists
+    regions = [
+        ("text", (0.08, 0.28, 0.55, 0.35), "body line"),
+        ("header", (0.08, 0.01, 0.55, 0.05), "HEADER LINE"),
+    ]
+    n = _snap_scanned_geometry(doc, {1: (regions, 595.0, 842.0)}, image_backed={1})
+    assert n >= 2
+    for t in doc.texts:
+        assert str(t.prov[0].bbox.coord_origin).upper().endswith("TOPLEFT")  # snapped to visual
+    body = next(t for t in doc.texts if t.label != DocItemLabel.PAGE_HEADER)
+    assert body.prov[0].bbox.t == pytest.approx(0.28 * 842.0, abs=2)  # the OCR region's top, not 0.30
+
+    # Gate: a non-scanned page (image_backed empty) is untouched.
+    doc2 = _build_doc_from_grounded({1: ([("text", (0.1, 0.3, 0.5, 0.33), "x")], 595.0, 842.0)})
+    assert _snap_scanned_geometry(doc2, {1: (regions, 595.0, 842.0)}, image_backed=set()) == 0
 
 
 def test_correct_furniture_labels_demotes_body_mislabels():
