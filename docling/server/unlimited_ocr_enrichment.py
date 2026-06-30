@@ -69,6 +69,20 @@ _DIGITAL_FASTPATH = (
 )
 _MIN_DIGITAL_TEXT_CHARS = int(os.environ.get("SHUBO_DOCLING_MIN_DIGITAL_CHARS", "100"))
 
+# Whole-page picture fallback for SCANNED / image-dominated pages. Region-level picture detection is
+# unreliable on a scan (the OCR model transcribes a signature/figure as text and the layout model
+# finds no picture cluster), so a page whose NATIVE (pre-OCR) text layer is sparse is captured as one
+# page-level PictureItem. That feeds the page image into the visual-description pipeline (the page is
+# the visual unit on a scan), so signatures/stamps/figures are no longer lost. A page with a richer
+# native text layer is treated as digital — its content is the text — and gets no page picture.
+_PAGE_PICTURE_ENABLED = (
+    os.environ.get("SHUBO_DOCLING_PAGE_PICTURE", "1").strip().lower()
+    not in ("0", "false", "no", "off")
+)
+_PAGE_PICTURE_MAX_NATIVE_CHARS = int(
+    os.environ.get("SHUBO_DOCLING_PAGE_PICTURE_MAX_NATIVE_CHARS", "500")
+)
+
 # ── garbled embedded-span reconcile (hybrid digital + handwriting pages) ─────────────────────────
 # A HYBRID page is a clean, digitally-generated page (e.g. a DocuSign-stamped agreement) that ALSO
 # carries a line some UPSTREAM tool already OCR'd into the PDF text layer as garbage — a handwritten
@@ -429,7 +443,11 @@ def _build_doc_from_grounded(page_data: dict) -> DoclingDocument:
                     doc.add_table(data=td, prov=prov)
                 continue
             if resolved == DocItemLabel.PICTURE:
-                continue  # no OCR text to attach to a bare picture
+                # A bare picture carries no OCR text, but it MUST still become a PictureItem so the
+                # downstream visual-description pipeline can describe it. Dropping it here is why
+                # detected figures/signatures never reached doc.pictures on image-only PDFs.
+                doc.add_picture(prov=prov)
+                continue
             if resolved == DocItemLabel.LIST_ITEM:
                 try:
                     doc.add_list_item(text=text, prov=prov)
@@ -630,6 +648,42 @@ def _inject_formulas(page_data: dict, formula_regions: dict) -> None:
         page_data[page_no] = (kept, pw, ph)
 
 
+def _add_scanned_page_pictures(doc: DoclingDocument, native_chars_by_page: dict) -> int:
+    """Emit a whole-page PictureItem for every image-dominated (scanned) page so its visual content
+    flows into the downstream visual-description pipeline.
+
+    A page is image-dominated when its NATIVE (pre-OCR) text layer is sparse
+    (≤ `_PAGE_PICTURE_MAX_NATIVE_CHARS`): on such a page the meaning lives in the pixels (signatures,
+    stamps, figures, handwriting), which no region-level detector reliably finds on a scan. A page that
+    already carries a detected picture (region-level) is left alone — no duplicate whole-page box.
+    Returns the number of page pictures added.
+    """
+    if not _PAGE_PICTURE_ENABLED:
+        return 0
+    pages_with_picture = {
+        prov.page_no for pic in doc.pictures for prov in (pic.prov or [])
+    }
+    added = 0
+    for page_no, page in doc.pages.items():
+        if page_no in pages_with_picture or page.size is None:
+            continue
+        if native_chars_by_page.get(page_no, 0) > _PAGE_PICTURE_MAX_NATIVE_CHARS:
+            continue  # rich native text → digital page; its content is the text, not the image
+        doc.add_picture(
+            prov=ProvenanceItem(
+                page_no=page_no,
+                bbox=BoundingBox(
+                    l=0.0, t=0.0,
+                    r=float(page.size.width), b=float(page.size.height),
+                    coord_origin=CoordOrigin.TOPLEFT,
+                ),
+                charspan=(0, 0),
+            )
+        )
+        added += 1
+    return added
+
+
 def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
     """PDF (path or bytes) → host-server contract `{markdown_pages, structured_document}`.
 
@@ -648,6 +702,11 @@ def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
         src = source
     doc: DoclingDocument = _structure_converter().convert(src).document
 
+    # NATIVE (pre-OCR) digital-text density per page, captured on the original layout doc before any
+    # grounded rebuild replaces `doc`. Drives both the digital-text fast path and the scanned-page
+    # picture fallback (a sparse native layer ⇒ an image-dominated/scanned page).
+    native_chars_by_page = _digital_text_chars_by_page(doc)
+
     # Formula enrichment: turn every layout-detected FORMULA leaf into deterministic LaTeX. Run on the
     # original layout doc (formula regions + page images exist for BOTH digital and image-only PDFs);
     # `formula_regions` carries them forward so the image-PDF grounded rebuild can re-inject them.
@@ -658,7 +717,7 @@ def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
     # layer already covers it — Docling's extracted text is exact and free, so those pages keep it
     # and are simply absent from page_data (the mapping below is a no-op for them). Scanned / empty
     # -layer pages fall through to OCR exactly as before.
-    digital_chars = _digital_text_chars_by_page(doc) if _DIGITAL_FASTPATH else {}
+    digital_chars = native_chars_by_page if _DIGITAL_FASTPATH else {}
     # Hybrid-page reconcile: pages classified digital that ALSO carry a garbled embedded span (e.g. a
     # handwritten date an upstream tool OCR'd into the text layer as garbage). Those are NOT skipped —
     # they get the whole-page OCR so the garbled span(s) can be replaced, while clean spans are kept.
@@ -784,7 +843,23 @@ def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
                 if box[2] - box[0] < _MIN_REGION_DIM or box[3] - box[1] < _MIN_REGION_DIM:
                     continue  # zero/near-zero area → an OCR loop artifact, not placeable content
                 resolved = _resolve_label(label, box)
-                if resolved in _NON_TEXT_LABELS or resolved == DocItemLabel.PICTURE:
+                if resolved == DocItemLabel.PICTURE:
+                    # An unmapped picture region (a figure the layout model missed): keep it as a
+                    # PictureItem so the visual-description pipeline can describe it, rather than
+                    # dropping it silently. Other non-text regions (table/chart/form/kv) are built
+                    # elsewhere or have no describe path, so they stay skipped.
+                    doc.add_picture(
+                        prov=ProvenanceItem(
+                            page_no=page_no,
+                            bbox=BoundingBox(
+                                l=box[0] * pw, t=box[1] * ph, r=box[2] * pw, b=box[3] * ph,
+                                coord_origin=CoordOrigin.TOPLEFT,
+                            ),
+                            charspan=(0, 0),
+                        )
+                    )
+                    continue
+                if resolved in _NON_TEXT_LABELS:
                     continue
                 cx, cy = (box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0
                 in_element = any(
@@ -811,6 +886,13 @@ def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
     # it covers both the grounded rebuild and the digital/structured path (which keeps layout labels
     # verbatim). Without this, a mislabeled content line is dropped from chunks by furniture chunking.
     _correct_furniture_labels(doc)
+
+    # Scanned/image-dominated pages: capture each as a whole-page PictureItem (region-level picture
+    # detection is unreliable on a scan), so signatures/figures/stamps reach the visual-description
+    # pipeline. Runs on the FINAL doc → covers the grounded rebuild and the digital/structured path.
+    page_pics = _add_scanned_page_pictures(doc, native_chars_by_page)
+    if page_pics:
+        logger.debug("added %d whole-page picture(s) for scanned/image-dominated page(s)", page_pics)
 
     page_nos = sorted(doc.pages)
     markdown_pages = (
