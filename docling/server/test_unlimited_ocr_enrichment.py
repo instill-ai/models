@@ -703,3 +703,59 @@ def test_recovery_skips_region_overlapping_detected_formula(tmp_path, monkeypatc
     full_md = "\n".join(out["markdown_pages"])
     assert "Genuine recovered footnote line" in full_md  # genuine unmapped region recovered
     assert "E equals m c squared garbled ocr" not in full_md  # formula transcription suppressed
+
+
+def test_enrich_formulas_caps_count_and_respects_time_budget(monkeypatch):
+    # Formula enrichment is bounded: at most _FORMULA_MAX_LEAVES formulas, and it stops once the
+    # wall-clock budget is exceeded (a formula-dense or GPU-contended doc can't dominate a conversion).
+    from PIL import Image
+    from docling_core.types.doc import (
+        DoclingDocument,
+        DocItemLabel,
+        ProvenanceItem,
+        BoundingBox,
+        CoordOrigin,
+        Size,
+        ImageRef,
+    )
+    import unlimited_ocr_enrichment as U
+
+    def build_doc(n):
+        doc = DoclingDocument(name="d")
+        doc.add_page(page_no=1, size=Size(width=595.0, height=842.0))
+        doc.pages[1].image = ImageRef.from_pil(Image.new("RGB", (300, 400), "white"), dpi=72)
+        for i in range(n):
+            prov = ProvenanceItem(
+                page_no=1,
+                bbox=BoundingBox(l=10, t=20.0 + i, r=80, b=30.0 + i, coord_origin=CoordOrigin.TOPLEFT),
+                charspan=(0, 1),
+            )
+            doc.add_text(label=DocItemLabel.FORMULA, text="x", orig="x", prov=prov)
+        return doc
+
+    seen = {"n": 0}
+
+    def fake_model(_doc, elements):
+        elements = list(elements)
+        seen["n"] += len(elements)
+        for e in elements:
+            e.item.text = "\\latex"
+        return []
+
+    monkeypatch.setattr(U, "_get_formula_model", lambda: fake_model)
+    monkeypatch.setattr(U, "_FORMULA_ENRICHMENT", True)
+
+    # Count cap: 100 formulas, cap 30 → exactly 30 enriched.
+    seen["n"] = 0
+    monkeypatch.setattr(U, "_FORMULA_MAX_LEAVES", 30)
+    monkeypatch.setattr(U, "_FORMULA_TIME_BUDGET_S", 9999.0)
+    monkeypatch.setattr(U, "_FORMULA_BATCH", 8)
+    U._enrich_formulas(build_doc(100))
+    assert seen["n"] == 30
+
+    # Time budget 0: stops after the first sub-batch (8) — never the whole set.
+    seen["n"] = 0
+    monkeypatch.setattr(U, "_FORMULA_MAX_LEAVES", 1000)
+    monkeypatch.setattr(U, "_FORMULA_TIME_BUDGET_S", 0.0)
+    U._enrich_formulas(build_doc(40))
+    assert seen["n"] == 8
