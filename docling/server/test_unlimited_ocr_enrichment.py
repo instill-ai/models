@@ -10,6 +10,7 @@ import pytest
 from unlimited_ocr_enrichment import (
     decode_bpe,
     parse_grounded_regions,
+    _add_scanned_page_pictures,
     _build_doc_from_grounded,
     _center_in_any,
     _correct_furniture_labels,
@@ -17,6 +18,7 @@ from unlimited_ocr_enrichment import (
     _html_to_grid,
     _inject_formulas,
     _is_garbled_text,
+    _PAGE_PICTURE_MAX_NATIVE_CHARS,
     _resolve_label,
 )
 
@@ -101,6 +103,47 @@ def test_build_doc_from_grounded_makes_structure_for_image_pdfs():
     assert len(sd["tables"]) == 1
     tb = sd["tables"][0]["data"]
     assert {c["text"] for c in tb["table_cells"]} >= {"Subscriber", "RTP", "22757"}
+
+
+def test_build_doc_from_grounded_emits_picture_for_image_region():
+    # A region the OCR model labels "image"/"figure" must become a PictureItem (so the visual
+    # description pipeline can describe it) — not be silently dropped.
+    regions = [
+        ("text", (0.05, 0.05, 0.50, 0.07), "Figure 1: the system"),
+        ("image", (0.10, 0.20, 0.80, 0.60), ""),
+    ]
+    doc = _build_doc_from_grounded({1: (regions, 1240.0, 1754.0)})
+    assert len(doc.pictures) == 1
+    bbox = doc.pictures[0].prov[0].bbox
+    # bbox carried through in page coordinates (0.10..0.80 * 1240).
+    assert bbox.l == pytest.approx(0.10 * 1240.0, abs=1)
+    assert bbox.r == pytest.approx(0.80 * 1240.0, abs=1)
+
+
+def test_scanned_page_gets_whole_page_picture_but_text_dense_page_does_not():
+    # A sparse-native-text page is image-dominated (scanned) → one whole-page PictureItem; a
+    # text-dense page is digital → none.
+    page = [("text", (0.1, 0.1, 0.5, 0.12), "Signed")]
+    doc = _build_doc_from_grounded({1: (page, 595.0, 842.0), 2: (page, 595.0, 842.0)})
+    native = {1: 40, 2: _PAGE_PICTURE_MAX_NATIVE_CHARS + 1}
+    added = _add_scanned_page_pictures(doc, native)
+    assert added == 1
+    pages_with_pic = {pr.page_no for p in doc.pictures for pr in p.prov}
+    assert pages_with_pic == {1}
+    # The whole-page picture spans the full page.
+    bbox = doc.pictures[0].prov[0].bbox
+    assert (bbox.l, bbox.t, bbox.r, bbox.b) == pytest.approx((0.0, 0.0, 595.0, 842.0))
+
+
+def test_scanned_page_picture_not_duplicated_when_region_picture_exists():
+    # A page that already carries a detected (region-level) picture must NOT also get a whole-page
+    # picture — no duplicate, region-level wins.
+    regions = [("image", (0.1, 0.2, 0.8, 0.6), "")]
+    doc = _build_doc_from_grounded({1: (regions, 595.0, 842.0)})
+    assert len(doc.pictures) == 1  # the region picture
+    added = _add_scanned_page_pictures(doc, {1: 0})  # sparse → would normally add a page picture
+    assert added == 0
+    assert len(doc.pictures) == 1
 
 
 def test_correct_furniture_labels_demotes_body_mislabels():
