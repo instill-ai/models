@@ -771,23 +771,38 @@ def test_multicolumn_author_block_each_author_grounded_in_its_own_column():
     # author row — Alex L. Zhang | Tim Kraska | Omar Khattab — must yield separate text nodes, each
     # grounded in its OWN column. This is the regression guard that the synthetic in-memory tests
     # cannot provide: it runs a REAL multi-column PDF through the actual Docling structure converter.
-    # Docling's raw reading-order MERGES the middle author into the left node; _resegment_overflow_nodes
-    # (run inside convert_to_contract) repairs it from PyMuPDF line geometry — applied here directly.
-    from unlimited_ocr_enrichment import _resegment_overflow_nodes, _structure_converter
+    # Docling's raw reading-order MERGES the middle author into the left node AND over-splits the left
+    # author's name from its affiliation. convert_to_contract repairs both — _resegment_overflow_nodes
+    # splits the cross-column merge, then _coalesce_text_blocks re-joins the same-column fragments — so
+    # each author ends up as ONE node (name + affiliation + email) grounded in its own column.
+    from unlimited_ocr_enrichment import (
+        _coalesce_text_blocks,
+        _resegment_overflow_nodes,
+        _structure_converter,
+    )
 
     path = os.path.join(_HERE, "testdata", "arxiv_authorblock_p1.pdf")
     doc = _structure_converter().convert(path).document
     with open(path, "rb") as fh:
-        _resegment_overflow_nodes(doc, fh.read())
+        src = fh.read()
+    _resegment_overflow_nodes(doc, src)
+    _coalesce_text_blocks(doc, src)
     p1 = [it for it in doc.texts if it.prov and it.prov[0].page_no == 1]
 
-    # A clean middle-author node carries Tim Kraska's email but NOT the left author's (no merge),
-    # and is grounded in the MIDDLE column (l ≈ 260+), never the left column (l ≈ 114).
-    kraska = next(
-        (it for it in p1 if it.text and "kraska@mit.edu" in it.text and "altzhang" not in it.text),
-        None,
-    )
-    assert kraska is not None, "no clean Tim Kraska node — merged into the left author's node"
-    assert kraska.prov[0].bbox.l > 240, (
-        f"Tim Kraska mis-grounded at left column l={kraska.prov[0].bbox.l:.0f} (merged, not re-segmented)"
-    )
+    # Each author is ONE node carrying their name + "MIT CSAIL" + email, grounded in its own column.
+    expected = [
+        ("Alex L. Zhang", "altzhang@mit.edu", 90, 240),  # left column
+        ("Tim Kraska", "kraska@mit.edu", 240, 360),  # middle column
+        ("Omar Khattab", "okhattab@mit.edu", 360, 520),  # right column
+    ]
+    for name, email, lo, hi in expected:
+        node = next((it for it in p1 if it.text and name in it.text), None)
+        assert node is not None, f"no node for {name}"
+        txt = node.text
+        # consistent grouping: the SAME node holds name, affiliation, and email (no over-split)
+        assert "MIT CSAIL" in txt and email in txt, f"{name} not grouped with affiliation/email: {txt!r}"
+        # and it carries only its OWN author (no cross-column merge with a neighbour)
+        others = [o_email for o_name, o_email, *_ in expected if o_name != name]
+        assert not any(o in txt for o in others), f"{name} node merges another author: {txt!r}"
+        # grounded in its own column
+        assert lo < node.prov[0].bbox.l < hi, f"{name} mis-grounded at l={node.prov[0].bbox.l:.0f}"

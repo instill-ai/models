@@ -962,6 +962,90 @@ def _resegment_overflow_nodes(doc: DoclingDocument, source: Union[str, bytes]) -
     return created
 
 
+def _page_text_blocks(mupage) -> list:
+    """PyMuPDF text blocks as (norm_text, x0, y0, x1, y1) in TOP-LEFT page coords. A block is PyMuPDF's
+    paragraph-level grouping — it keeps an author's name+affiliation+email together and keeps a heading
+    separate from the body that follows."""
+    out = []
+    for b in mupage.get_text("blocks"):
+        if len(b) < 7 or b[6] != 0:  # b[6] == 0 → text block
+            continue
+        t = " ".join(b[4].split())
+        if t:
+            out.append((t, b[0], b[1], b[2], b[3]))
+    return out
+
+
+def _coalesce_text_blocks(doc: DoclingDocument, source: Union[str, bytes]) -> int:
+    """Merge plain-TEXT nodes that one PyMuPDF block groups together but Docling OVER-SPLIT (e.g. an
+    author name kept separate from its affiliation/email). Each such block collapses to ONE node = the
+    block's text + bbox. Strictly scoped: only DocItemLabel.TEXT nodes whose text is fully inside the
+    block AND whose center sits in it, and only when ≥2 share a block — single-paragraph blocks (1
+    member) and all non-text structure (headers, lists, tables, formulas, captions) are untouched. Run
+    AFTER _resegment_overflow_nodes so a cross-column merge is first split into clean per-column pieces,
+    which this then re-joins with their same-column name fragment. Returns the number of nodes removed."""
+    if not _RESEGMENT_MULTICOL:
+        return 0
+    try:
+        import fitz
+
+        from docling_core.types.doc import BoundingBox, CoordOrigin, DocItemLabel
+
+        pdf = (
+            fitz.open(stream=bytes(source), filetype="pdf")
+            if isinstance(source, (bytes, bytearray))
+            else fitz.open(source)
+        )
+    except Exception:  # noqa: BLE001
+        return 0
+
+    by_page: dict = {}
+    for it in doc.texts:
+        if it.label == DocItemLabel.TEXT and it.prov and it.text:
+            by_page.setdefault(it.prov[0].page_no, []).append(it)
+
+    to_delete: list = []
+    deleted: set = set()
+    merged = 0
+    for pno, nodes in by_page.items():
+        if pno < 1 or pno > pdf.page_count:
+            continue
+        page_h = float(pdf[pno - 1].rect.height)
+        for (bt, bx0, by0, bx1, by1) in _page_text_blocks(pdf[pno - 1]):
+            members = []
+            for it in nodes:
+                if id(it) in deleted:
+                    continue
+                nt = " ".join((it.text or "").split())
+                if not nt or nt not in bt:
+                    continue
+                b = it.prov[0].bbox
+                cx = (b.l + b.r) / 2.0
+                cy = page_h - (b.t + b.b) / 2.0  # Docling bbox is BOTTOMLEFT → top-left for comparison
+                if bx0 - 1 <= cx <= bx1 + 1 and by0 - 1 <= cy <= by1 + 1:
+                    members.append(it)
+            if len(members) < 2:
+                continue
+            # Collapse to one node carrying the block's full, correctly-ordered text + bbox.
+            keep = members[0]
+            keep.text = bt
+            keep.orig = bt
+            keep.prov[0].bbox = BoundingBox(
+                l=bx0, r=bx1, t=page_h - by0, b=page_h - by1, coord_origin=CoordOrigin.BOTTOMLEFT
+            )
+            keep.prov[0].charspan = (0, len(bt))
+            for extra in members[1:]:
+                to_delete.append(extra)
+                deleted.add(id(extra))
+            merged += len(members) - 1
+    if to_delete:
+        try:
+            doc.delete_items(node_items=to_delete)
+        except Exception:  # noqa: BLE001
+            pass
+    return merged
+
+
 def _set_prov_bbox_from_norm(item, norm_box: Tuple[float, float, float, float], pw: float, ph: float) -> None:
     """Replace a mapped element's geometry with a normalized 0..1 TOP-LEFT box (the matched OCR
     region's), converted to page coordinates — aligns a scanned-page element with the rendered page
@@ -1105,7 +1189,10 @@ def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
 
     # Repair multi-column reading-order merges (a 3-up author block threaded into one node) using
     # PyMuPDF line geometry, BEFORE density/garble are measured so each split column counts on its own.
+    # Then coalesce any same-block fragments Docling over-split (an author name kept apart from its
+    # affiliation/email) so each author is ONE consistent node — split first, then re-join.
     _resegment_overflow_nodes(doc, source)
+    _coalesce_text_blocks(doc, source)
 
     # NATIVE (pre-OCR) digital-text density per page, captured on the original layout doc before any
     # grounded rebuild replaces `doc`. Drives both the digital-text fast path and the scanned-page
