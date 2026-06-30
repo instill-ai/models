@@ -836,6 +836,132 @@ def _image_backed_pages(source: Union[str, bytes]) -> set:
     return out
 
 
+# Docling's PDF reading-order sometimes threads a multi-column row (a 3-up author block, a 2-column
+# header) into ONE text node — the node carries text from several columns under a single left-column
+# bbox, so the other columns get no box (the dashboard "missing author" regression). PyMuPDF's own
+# line geometry segments those columns correctly, so we re-split such a node per column. Killswitch +
+# the min x-gap (pt) between columns that counts as a reading-order jump.
+_RESEGMENT_MULTICOL = (
+    os.environ.get("SHUBO_DOCLING_RESEGMENT_MULTICOL", "1").strip().lower()
+    not in ("0", "false", "no", "off")
+)
+_RESEGMENT_COL_GAP = float(os.environ.get("SHUBO_DOCLING_RESEGMENT_COL_GAP", "40"))
+
+
+def _page_text_lines(mupage) -> list:
+    """PyMuPDF text lines for a page as (norm_text, x0, y0, x1, y1) in TOP-LEFT page coords."""
+    out = []
+    for blk in mupage.get_text("dict").get("blocks", []):
+        if blk.get("type") != 0:  # 0 == text block
+            continue
+        for ln in blk.get("lines", []):
+            txt = " ".join("".join(s.get("text", "") for s in ln.get("spans", [])).split())
+            if txt:
+                x0, y0, x1, y1 = ln["bbox"]
+                out.append((txt, x0, y0, x1, y1))
+    return out
+
+
+def _resegment_overflow_nodes(doc: DoclingDocument, source: Union[str, bytes]) -> int:
+    """Re-split a text node that Docling threaded across COLUMNS back into one node per column, using
+    PyMuPDF line geometry as ground truth. ONLY nodes whose own constituent lines span >1 column are
+    touched (rare + clearly broken), so single-column prose — which Docling reads correctly — is never
+    altered. A scanned page has no text layer, so it yields no lines and is a natural no-op. Best-effort
+    and fully gated; returns the number of extra nodes created."""
+    if not _RESEGMENT_MULTICOL:
+        return 0
+    try:
+        import fitz
+
+        from docling_core.types.doc import BoundingBox, CoordOrigin, ProvenanceItem
+
+        pdf = (
+            fitz.open(stream=bytes(source), filetype="pdf")
+            if isinstance(source, (bytes, bytearray))
+            else fitz.open(source)
+        )
+    except Exception:  # noqa: BLE001
+        return 0
+
+    page_lines: dict = {}
+    created = 0
+    for it in list(doc.texts):  # snapshot — we append while iterating
+        if not it.prov or not it.text:
+            continue
+        pno = it.prov[0].page_no
+        if pno < 1 or pno > pdf.page_count:
+            continue
+        node_norm = " ".join(it.text.split())
+        if len(node_norm) < 12:
+            continue
+        if pno not in page_lines:
+            page_lines[pno] = _page_text_lines(pdf[pno - 1])
+        lines = page_lines[pno]
+        page_h = float(pdf[pno - 1].rect.height)
+
+        # Greedily reconstruct the node text from page lines, consuming from the front. When several
+        # lines match the next prefix (repeats like "MIT CSAIL" recur in every column), pick the one
+        # spatially CLOSEST to the previously-consumed line — that keeps each column's lines together.
+        remaining = node_norm
+        chosen: list = []
+        # seed the spatial anchor at the node's own (top-left) position so the first pick is local
+        ob = it.prov[0].bbox
+        prev_xy = (ob.l, page_h - ob.t)
+        ok = True
+        while remaining:
+            cands = [L for L in lines if remaining.startswith(L[0])]
+            if not cands:
+                ok = False
+                break
+            px, py = prev_xy
+            pick = min(cands, key=lambda L: abs(L[1] - px) + abs(L[2] - py))
+            chosen.append(pick)
+            prev_xy = (pick[1], pick[2])
+            remaining = remaining[len(pick[0]):].lstrip()
+        if not ok or len(chosen) < 2:
+            continue
+        xs = sorted(L[1] for L in chosen)
+        if xs[-1] - xs[0] <= _RESEGMENT_COL_GAP:
+            continue  # single column — Docling read it fine
+
+        # Cluster the chosen lines into columns by x0 gaps.
+        cols: list = []
+        for L in sorted(chosen, key=lambda L: (L[1], L[2])):
+            if cols and L[1] - cols[-1]["x0"] <= _RESEGMENT_COL_GAP:
+                cols[-1]["lines"].append(L)
+            else:
+                cols.append({"x0": L[1], "lines": [L]})
+        if len(cols) < 2:
+            continue
+
+        segs = []
+        for c in cols:
+            cl = sorted(c["lines"], key=lambda L: L[2])  # top→bottom within the column
+            txt = " ".join(L[0] for L in cl)
+            x0 = min(L[1] for L in cl)
+            y0 = min(L[2] for L in cl)
+            x1 = max(L[3] for L in cl)
+            y1 = max(L[4] for L in cl)
+            bb = BoundingBox(l=x0, r=x1, t=page_h - y0, b=page_h - y1, coord_origin=CoordOrigin.BOTTOMLEFT)
+            segs.append((txt, bb))
+
+        # Mutate the original node into the first column; append the rest as sibling text nodes.
+        ft, fb = segs[0]
+        it.text = ft
+        it.orig = ft
+        it.prov[0].bbox = fb
+        it.prov[0].charspan = (0, len(ft))
+        for txt, bb in segs[1:]:
+            doc.add_text(
+                label=it.label,
+                text=txt,
+                orig=txt,
+                prov=ProvenanceItem(page_no=pno, bbox=bb, charspan=(0, len(txt))),
+            )
+            created += 1
+    return created
+
+
 def _set_prov_bbox_from_norm(item, norm_box: Tuple[float, float, float, float], pw: float, ph: float) -> None:
     """Replace a mapped element's geometry with a normalized 0..1 TOP-LEFT box (the matched OCR
     region's), converted to page coordinates — aligns a scanned-page element with the rendered page
@@ -976,6 +1102,10 @@ def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
     else:
         src = source
     doc: DoclingDocument = _structure_converter().convert(src).document
+
+    # Repair multi-column reading-order merges (a 3-up author block threaded into one node) using
+    # PyMuPDF line geometry, BEFORE density/garble are measured so each split column counts on its own.
+    _resegment_overflow_nodes(doc, source)
 
     # NATIVE (pre-OCR) digital-text density per page, captured on the original layout doc before any
     # grounded rebuild replaces `doc`. Drives both the digital-text fast path and the scanned-page
