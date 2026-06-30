@@ -5,6 +5,8 @@ The integration test runs the REAL Docling layout/table pipeline on a generated 
 full-page OCR (grounded regions), validating that structure is restored AND each element/table is
 filled from the mapped OCR text — without the ~3.7 GB Unlimited-OCR weights.
 """
+import os
+
 import pytest
 
 from unlimited_ocr_enrichment import (
@@ -759,3 +761,39 @@ def test_enrich_formulas_caps_count_and_respects_time_budget(monkeypatch):
     monkeypatch.setattr(U, "_FORMULA_TIME_BUDGET_S", 0.0)
     U._enrich_formulas(build_doc(40))
     assert seen["n"] == 8
+
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+@pytest.mark.xfail(
+    reason="KNOWN BUG: Docling's PDF reading-order MERGES the 3-column author block — "
+    "'Tim Kraska MIT CSAIL kraska@mit.edu' is concatenated into the LEFT author's node with a "
+    "left-column bbox, so the middle author gets no box (the dashboard regression). Fixing it needs "
+    "region-aware multi-column re-segmentation, not a heuristic. Remove this xfail when the fix lands.",
+    strict=False,
+)
+def test_multicolumn_author_block_each_author_grounded_in_its_own_column():
+    # Real arxiv page 1 (2512.24601v1, images stripped to keep the fixture small). The 3-column
+    # author row — Alex L. Zhang | Tim Kraska | Omar Khattab — must yield separate text nodes, each
+    # grounded in its OWN column. This is the regression guard that the synthetic in-memory tests
+    # cannot provide: it runs a REAL multi-column PDF through the actual Docling structure converter.
+    from unlimited_ocr_enrichment import _structure_converter
+
+    doc = (
+        _structure_converter()
+        .convert(os.path.join(_HERE, "testdata", "arxiv_authorblock_p1.pdf"))
+        .document
+    )
+    p1 = [it for it in doc.texts if it.prov and it.prov[0].page_no == 1]
+
+    # A clean middle-author node carries Tim Kraska's email but NOT the left author's (no merge),
+    # and is grounded in the MIDDLE column (l ≈ 260+), never the left column (l ≈ 114).
+    kraska = next(
+        (it for it in p1 if it.text and "kraska@mit.edu" in it.text and "altzhang" not in it.text),
+        None,
+    )
+    assert kraska is not None, "no clean Tim Kraska node — merged into the left author's node"
+    assert kraska.prov[0].bbox.l > 240, (
+        f"Tim Kraska mis-grounded at left column l={kraska.prov[0].bbox.l:.0f} (merged, not re-segmented)"
+    )
