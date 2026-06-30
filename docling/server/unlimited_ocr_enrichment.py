@@ -101,6 +101,12 @@ _SCAN_VISUAL_BBOX = (
     not in ("0", "false", "no", "off")
 )
 _IMAGE_BACKED_MIN_COVER = float(os.environ.get("SHUBO_DOCLING_IMAGE_BACKED_MIN_COVER", "0.8"))
+# Table cells carry their OWN reduced bbox and have no per-cell OCR region to snap to, so on a scanned
+# page they're expanded vertically by the page's MEASURED body-text reduction (the same clip). Killable.
+_TABLE_CELL_EXPAND = (
+    os.environ.get("SHUBO_DOCLING_TABLE_CELL_EXPAND", "1").strip().lower()
+    not in ("0", "false", "no", "off")
+)
 
 # ── garbled embedded-span reconcile (hybrid digital + handwriting pages) ─────────────────────────
 # A HYBRID page is a clean, digitally-generated page (e.g. a DocuSign-stamped agreement) that ALSO
@@ -829,6 +835,10 @@ def _snap_scanned_geometry(doc: DoclingDocument, page_data: dict, image_backed: 
     texts = [(it, False) for it in (getattr(doc, "texts", None) or [])]
     tables = [(it, True) for it in (getattr(doc, "tables", None) or [])]
     count = 0
+    # Per-page vertical reduction (page points) measured from each body-text snap: how far the OCR
+    # region extends ABOVE / BELOW Docling's clipped box. Reused to expand table cells (below), which
+    # carry their own clipped box and have no per-cell OCR region to snap to.
+    pads: dict = {}
     for item, is_table in texts + tables:
         prov = getattr(item, "prov", None)
         if not prov:
@@ -844,10 +854,60 @@ def _snap_scanned_geometry(doc: DoclingDocument, page_data: dict, image_backed: 
         # any region so an element is never left on its clipped box when a same-kind match is missing.
         same_kind = [r for r in regions if (r[0] == "table") == is_table]
         reg = _best_region(box, same_kind) or _best_region(box, regions)
-        if reg:
-            _set_prov_bbox_from_norm(item, reg[1], pw, ph)
-            count += 1
+        if not reg:
+            continue
+        if not is_table:  # box=[l,t,r,b] 0..1 TL; reg[1] likewise — record how much the box must grow
+            tp, bp = (box[1] - reg[1][1]) * ph, (reg[1][3] - box[3]) * ph
+            if tp > 0 or bp > 0:
+                pads.setdefault(page_no, []).append((max(0.0, tp), max(0.0, bp)))
+        _set_prov_bbox_from_norm(item, reg[1], pw, ph)
+        count += 1
+    if _TABLE_CELL_EXPAND:
+        count += _expand_table_cells(tables, image_backed, pads)
     return count
+
+
+def _median(xs: List[float]) -> float:
+    s = sorted(xs)
+    n = len(s)
+    if n == 0:
+        return 0.0
+    return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2.0
+
+
+def _expand_table_cells(tables, image_backed: set, pads: dict) -> int:
+    """Expand each scanned-table cell's reduced bbox vertically by the page's MEDIAN body-text reduction
+    (`pads`), so the overlay box hugs the cell text. Cells carry Docling's clipped box and have no
+    per-cell OCR region to snap to; the reduction is the same per-line font margin as the body, so it's
+    added as an absolute point pad (capped at the cell's own height so a multi-line cell isn't blown up)."""
+    n = 0
+    for item, _is_table in tables:
+        prov = getattr(item, "prov", None)
+        if not prov or prov[0].page_no not in image_backed:
+            continue
+        plist = pads.get(prov[0].page_no)
+        if not plist:
+            continue
+        top_pad = _median([p[0] for p in plist])
+        bot_pad = _median([p[1] for p in plist])
+        if top_pad <= 0 and bot_pad <= 0:
+            continue
+        for cell in (getattr(getattr(item, "data", None), "table_cells", None) or []):
+            b = getattr(cell, "bbox", None)
+            if b is None:
+                continue
+            h = abs(b.t - b.b)
+            tp, bp = min(top_pad, h), min(bot_pad, h)
+            is_bl = getattr(b.coord_origin, "value", b.coord_origin) == CoordOrigin.BOTTOMLEFT.value
+            cell.bbox = BoundingBox(
+                l=b.l,
+                t=b.t + tp if is_bl else b.t - tp,
+                r=b.r,
+                b=b.b - bp if is_bl else b.b + bp,
+                coord_origin=b.coord_origin,
+            )
+            n += 1
+    return n
 
 
 def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:

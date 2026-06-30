@@ -15,6 +15,8 @@ from unlimited_ocr_enrichment import (
     _image_backed_pages,
     _set_prov_bbox_from_norm,
     _snap_scanned_geometry,
+    _expand_table_cells,
+    _median,
     _build_doc_from_grounded,
     _center_in_any,
     _correct_furniture_labels,
@@ -220,6 +222,33 @@ def test_snap_scanned_geometry_aligns_text_and_furniture_to_ocr_regions():
     # Gate: a non-scanned page (image_backed empty) is untouched.
     doc2 = _build_doc_from_grounded({1: ([("text", (0.1, 0.3, 0.5, 0.33), "x")], 595.0, 842.0)})
     assert _snap_scanned_geometry(doc2, {1: (regions, 595.0, 842.0)}, image_backed=set()) == 0
+
+
+def test_expand_table_cells_grows_clipped_cells_by_page_median_pad():
+    # A scanned table cell carries Docling's reduced (clipped) bbox; expand it by the page's median
+    # body-text reduction so the overlay box hugs the cell text.
+    from types import SimpleNamespace
+    from docling_core.types.doc import BoundingBox, CoordOrigin
+
+    assert _median([5.0, 4.0, 1.0]) == 4.0  # sanity
+
+    cell = SimpleNamespace(
+        bbox=BoundingBox(l=10, t=100, r=50, b=107, coord_origin=CoordOrigin.TOPLEFT)  # 7pt clipped
+    )
+    table = SimpleNamespace(
+        prov=[SimpleNamespace(page_no=1)], data=SimpleNamespace(table_cells=[cell])
+    )
+    pads = {1: [(4.0, 1.0), (5.0, 1.0)]}  # median top=4.5, bot=1.0
+    n = _expand_table_cells([(table, True)], image_backed={1}, pads=pads)
+    assert n == 1
+    assert cell.bbox.t == pytest.approx(100 - 4.5)  # top grew UP
+    assert cell.bbox.b == pytest.approx(107 + 1.0)  # bottom grew DOWN
+
+    # Non-scanned (no page pad) → untouched.
+    cell2 = SimpleNamespace(bbox=BoundingBox(l=10, t=100, r=50, b=107, coord_origin=CoordOrigin.TOPLEFT))
+    table2 = SimpleNamespace(prov=[SimpleNamespace(page_no=1)], data=SimpleNamespace(table_cells=[cell2]))
+    assert _expand_table_cells([(table2, True)], image_backed={1}, pads={}) == 0
+    assert cell2.bbox.t == 100
 
 
 def test_correct_furniture_labels_demotes_body_mislabels():
