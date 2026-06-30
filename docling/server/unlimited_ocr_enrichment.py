@@ -91,6 +91,17 @@ _VIS_ERASE_PAD_FRAC = float(os.environ.get("SHUBO_DOCLING_VIS_ERASE_PAD_FRAC", "
 _VIS_BAND_FRAC = float(os.environ.get("SHUBO_DOCLING_VIS_BAND_FRAC", "0.08"))  # header/footer skip
 _VIS_MIN_DIM_FRAC = float(os.environ.get("SHUBO_DOCLING_VIS_MIN_DIM_FRAC", "0.012"))  # drop thin rules
 
+# Scanned-page geometry. A SCANNED page is rendered from a (near) full-page raster image, even if it
+# also carries an embedded text layer. On such a page Docling's PDF backend extracts a REDUCED / lower
+# text-cell bbox (~x-height) that clips the visual ink, while the Unlimited-OCR region (detected on the
+# rendered image) matches the page image exactly. So on scanned pages we (a) never digital-fast-path
+# them and (b) adopt the matched OCR region's bbox as each element's geometry. Killable.
+_SCAN_VISUAL_BBOX = (
+    os.environ.get("SHUBO_DOCLING_SCAN_VISUAL_BBOX", "1").strip().lower()
+    not in ("0", "false", "no", "off")
+)
+_IMAGE_BACKED_MIN_COVER = float(os.environ.get("SHUBO_DOCLING_IMAGE_BACKED_MIN_COVER", "0.8"))
+
 # ── garbled embedded-span reconcile (hybrid digital + handwriting pages) ─────────────────────────
 # A HYBRID page is a clean, digitally-generated page (e.g. a DocuSign-stamped agreement) that ALSO
 # carries a line some UPSTREAM tool already OCR'd into the PDF text layer as garbage — a handwritten
@@ -760,6 +771,51 @@ def _add_scanned_page_pictures(
     return added
 
 
+def _image_backed_pages(source: Union[str, bytes]) -> set:
+    """Page numbers (1-based) rendered from a (near) full-page raster image — a SCANNED page, even when
+    it also carries a digital text layer. Detected via a single image XObject covering
+    ≥ `_IMAGE_BACKED_MIN_COVER` of the page. Best-effort: empty on any parse failure (degrades to the
+    pre-fix behaviour). Gated by `_SCAN_VISUAL_BBOX`."""
+    if not _SCAN_VISUAL_BBOX:
+        return set()
+    try:
+        import fitz  # PyMuPDF (a Docling dependency)
+
+        doc = (
+            fitz.open(stream=bytes(source), filetype="pdf")
+            if isinstance(source, (bytes, bytearray))
+            else fitz.open(source)
+        )
+    except Exception:  # noqa: BLE001
+        return set()
+    out = set()
+    for i in range(doc.page_count):
+        pg = doc[i]
+        page_area = float(pg.rect.width * pg.rect.height) or 1.0
+        for im in pg.get_images(full=True):
+            try:
+                rects = pg.get_image_rects(im[0])
+            except Exception:  # noqa: BLE001
+                continue
+            if any((r.width * r.height) >= _IMAGE_BACKED_MIN_COVER * page_area for r in rects):
+                out.add(i + 1)
+                break
+    return out
+
+
+def _set_prov_bbox_from_norm(item, norm_box: Tuple[float, float, float, float], pw: float, ph: float) -> None:
+    """Replace a mapped element's geometry with a normalized 0..1 TOP-LEFT box (the matched OCR
+    region's), converted to page coordinates — aligns a scanned-page element with the rendered page
+    image (Docling's embedded-text-cell box clips the visual ink there)."""
+    prov = getattr(item, "prov", None)
+    if not prov:
+        return
+    l, t, r, b = norm_box
+    prov[0].bbox = BoundingBox(
+        l=l * pw, t=t * ph, r=r * pw, b=b * ph, coord_origin=CoordOrigin.TOPLEFT
+    )
+
+
 def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
     """PDF (path or bytes) → host-server contract `{markdown_pages, structured_document}`.
 
@@ -789,6 +845,9 @@ def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
         for p, pg in doc.pages.items()
         if pg.image is not None and pg.image.pil_image is not None
     }
+    # Scanned (image-backed) pages: never digital-fast-pathed (their embedded-text geometry clips), and
+    # their mapped elements adopt the visual OCR-region bbox below.
+    image_backed = _image_backed_pages(source)
 
     # Formula enrichment: turn every layout-detected FORMULA leaf into deterministic LaTeX. Run on the
     # original layout doc (formula regions + page images exist for BOTH digital and image-only PDFs);
@@ -816,7 +875,7 @@ def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
         if img is None or page.size is None:
             continue
         is_digital = _DIGITAL_FASTPATH and digital_chars.get(page_no, 0) >= _MIN_DIGITAL_TEXT_CHARS
-        if is_digital and page_no not in garbled_pages:
+        if is_digital and page_no not in garbled_pages and page_no not in image_backed:
             skipped_digital += 1
             continue  # clean digital text layer → keep Docling's exact text, skip MLX OCR (zero cost)
         page_data[page_no] = (
@@ -895,6 +954,10 @@ def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
                     if not reconcile or _is_garbled_text(item.text or ""):
                         item.text = reg[2]
                         item.orig = reg[2]
+                    # Scanned page: adopt the OCR region's (visual) bbox so the overlay box hugs the
+                    # rendered ink instead of Docling's reduced embedded-text-cell box (which clips it).
+                    if page_no in image_backed:
+                        _set_prov_bbox_from_norm(item, reg[1], pw, ph)
                     consumed.add(id(reg))
 
         # Second pass: recover regions Docling's layout under-segmented. Full-page OCR sometimes

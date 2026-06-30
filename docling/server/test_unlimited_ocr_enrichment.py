@@ -12,6 +12,8 @@ from unlimited_ocr_enrichment import (
     parse_grounded_regions,
     _add_scanned_page_pictures,
     _detect_visual_regions,
+    _image_backed_pages,
+    _set_prov_bbox_from_norm,
     _build_doc_from_grounded,
     _center_in_any,
     _correct_furniture_labels,
@@ -161,6 +163,34 @@ def test_add_scanned_page_pictures_boxes_graphic_on_sparse_page_only():
     dense = _build_doc_from_grounded({1: (text, 595.0, 842.0)})
     added2 = _add_scanned_page_pictures(dense, {1: _PAGE_PICTURE_MAX_NATIVE_CHARS + 1}, {1: img})
     assert added2 == 0
+
+
+def test_image_backed_pages_detects_full_page_image_only():
+    # A page rendered from a (near) full-page raster image is "scanned"; a pure-vector page is not.
+    import io
+    import fitz
+    import numpy as np
+    from PIL import Image
+
+    doc = fitz.open()
+    pg = doc.new_page(width=595, height=842)
+    buf = io.BytesIO()
+    Image.fromarray((np.ones((200, 140, 3)) * 255).astype("uint8")).save(buf, format="PNG")
+    pg.insert_image(pg.rect, stream=buf.getvalue())  # cover the whole page
+    assert _image_backed_pages(doc.tobytes()) == {1}
+
+    vec = fitz.open()
+    vec.new_page(width=595, height=842).insert_text((50, 50), "vector text only")
+    assert _image_backed_pages(vec.tobytes()) == set()
+
+
+def test_set_prov_bbox_from_norm_writes_topleft_page_coords():
+    doc = _build_doc_from_grounded({1: ([("text", (0.1, 0.1, 0.5, 0.12), "x")], 595.0, 842.0)})
+    item = doc.texts[0]
+    _set_prov_bbox_from_norm(item, (0.2, 0.3, 0.6, 0.34), 595.0, 842.0)
+    b = item.prov[0].bbox
+    assert (b.l, b.t, b.r, b.b) == pytest.approx((0.2 * 595, 0.3 * 842, 0.6 * 595, 0.34 * 842))
+    assert str(b.coord_origin).upper().endswith("TOPLEFT")
 
 
 def test_correct_furniture_labels_demotes_body_mislabels():
