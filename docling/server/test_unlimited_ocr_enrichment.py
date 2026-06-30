@@ -11,6 +11,9 @@ from unlimited_ocr_enrichment import (
     decode_bpe,
     parse_grounded_regions,
     _add_scanned_page_pictures,
+    _detect_visual_regions,
+    _image_backed_pages,
+    _set_prov_bbox_from_norm,
     _build_doc_from_grounded,
     _center_in_any,
     _correct_furniture_labels,
@@ -120,30 +123,74 @@ def test_build_doc_from_grounded_emits_picture_for_image_region():
     assert bbox.r == pytest.approx(0.80 * 1240.0, abs=1)
 
 
-def test_scanned_page_gets_whole_page_picture_but_text_dense_page_does_not():
-    # A sparse-native-text page is image-dominated (scanned) → one whole-page PictureItem; a
-    # text-dense page is digital → none.
-    page = [("text", (0.1, 0.1, 0.5, 0.12), "Signed")]
-    doc = _build_doc_from_grounded({1: (page, 595.0, 842.0), 2: (page, 595.0, 842.0)})
-    native = {1: 40, 2: _PAGE_PICTURE_MAX_NATIVE_CHARS + 1}
-    added = _add_scanned_page_pictures(doc, native)
+def test_detect_visual_regions_boxes_residual_ink_and_skips_erased():
+    # Residual-ink detector: ink OUTSIDE any detected-element box is a graphic and is boxed tightly;
+    # ink INSIDE an erase rect (already-explained text) is removed and never surfaces.
+    import numpy as np
+
+    W, H = 1240, 1754
+    gray = np.full((H, W), 255, np.uint8)
+    gray[400:470, 300:520] = 0   # a graphic (signature-like) blob in the body
+    gray[800:860, 300:520] = 0   # an "ink" blob that lives under a detected text box
+    erase = [(290, 790, 530, 870)]  # px box around the second blob
+    regions = _detect_visual_regions(gray, erase, W, H)
+    assert len(regions) == 1
+    x0, y0, x1, y1 = regions[0]
+    assert 250 <= x0 <= 305 and 380 <= y0 <= 405   # tight around the first blob
+    assert 515 <= x1 <= 560 and 465 <= y1 <= 490
+
+
+def test_add_scanned_page_pictures_boxes_graphic_on_sparse_page_only():
+    # A sparse (scanned) page: the residual graphic becomes a tight PictureItem; a text-dense page is
+    # treated as digital and skipped.
+    import numpy as np
+    from PIL import Image
+
+    W, H = 1240, 1754
+    arr = np.full((H, W), 255, np.uint8)
+    arr[400:470, 300:520] = 0  # graphic outside the (sparse) text box
+    img = Image.fromarray(arr)
+    text = [("text", (0.1, 0.6, 0.4, 0.62), "Signed:")]
+
+    doc = _build_doc_from_grounded({1: (text, 595.0, 842.0)})
+    added = _add_scanned_page_pictures(doc, {1: 30}, {1: img})
     assert added == 1
-    pages_with_pic = {pr.page_no for p in doc.pictures for pr in p.prov}
-    assert pages_with_pic == {1}
-    # The whole-page picture spans the full page.
+    sx = W / 595.0
     bbox = doc.pictures[0].prov[0].bbox
-    assert (bbox.l, bbox.t, bbox.r, bbox.b) == pytest.approx((0.0, 0.0, 595.0, 842.0))
+    assert bbox.l == pytest.approx(300 / sx, abs=8)  # tight, not the whole page
+    assert bbox.r == pytest.approx(520 / sx, abs=8)
+
+    dense = _build_doc_from_grounded({1: (text, 595.0, 842.0)})
+    added2 = _add_scanned_page_pictures(dense, {1: _PAGE_PICTURE_MAX_NATIVE_CHARS + 1}, {1: img})
+    assert added2 == 0
 
 
-def test_scanned_page_picture_not_duplicated_when_region_picture_exists():
-    # A page that already carries a detected (region-level) picture must NOT also get a whole-page
-    # picture — no duplicate, region-level wins.
-    regions = [("image", (0.1, 0.2, 0.8, 0.6), "")]
-    doc = _build_doc_from_grounded({1: (regions, 595.0, 842.0)})
-    assert len(doc.pictures) == 1  # the region picture
-    added = _add_scanned_page_pictures(doc, {1: 0})  # sparse → would normally add a page picture
-    assert added == 0
-    assert len(doc.pictures) == 1
+def test_image_backed_pages_detects_full_page_image_only():
+    # A page rendered from a (near) full-page raster image is "scanned"; a pure-vector page is not.
+    import io
+    import fitz
+    import numpy as np
+    from PIL import Image
+
+    doc = fitz.open()
+    pg = doc.new_page(width=595, height=842)
+    buf = io.BytesIO()
+    Image.fromarray((np.ones((200, 140, 3)) * 255).astype("uint8")).save(buf, format="PNG")
+    pg.insert_image(pg.rect, stream=buf.getvalue())  # cover the whole page
+    assert _image_backed_pages(doc.tobytes()) == {1}
+
+    vec = fitz.open()
+    vec.new_page(width=595, height=842).insert_text((50, 50), "vector text only")
+    assert _image_backed_pages(vec.tobytes()) == set()
+
+
+def test_set_prov_bbox_from_norm_writes_topleft_page_coords():
+    doc = _build_doc_from_grounded({1: ([("text", (0.1, 0.1, 0.5, 0.12), "x")], 595.0, 842.0)})
+    item = doc.texts[0]
+    _set_prov_bbox_from_norm(item, (0.2, 0.3, 0.6, 0.34), 595.0, 842.0)
+    b = item.prov[0].bbox
+    assert (b.l, b.t, b.r, b.b) == pytest.approx((0.2 * 595, 0.3 * 842, 0.6 * 595, 0.34 * 842))
+    assert str(b.coord_origin).upper().endswith("TOPLEFT")
 
 
 def test_correct_furniture_labels_demotes_body_mislabels():
