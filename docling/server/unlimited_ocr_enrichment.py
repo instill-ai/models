@@ -816,6 +816,40 @@ def _set_prov_bbox_from_norm(item, norm_box: Tuple[float, float, float, float], 
     )
 
 
+def _snap_scanned_geometry(doc: DoclingDocument, page_data: dict, image_backed: set) -> int:
+    """Unified scanned-page geometry pass: replace each element's bbox with its best-matching OCR
+    region's bbox so the overlay box hugs the rendered ink (Docling's embedded-text-cell boxes clip it).
+
+    Iterates `doc.texts` (which — unlike `iterate_items` — INCLUDES furniture: page header/footer) and
+    `doc.tables` (cells re-derive from the snapped table box). FORMULA leaves keep their geometry. Runs
+    AFTER residual-ink picture detection so a grown text box can't erase a detected figure. Returns the
+    number of elements snapped."""
+    if not _SCAN_VISUAL_BBOX:
+        return 0
+    texts = [(it, False) for it in (getattr(doc, "texts", None) or [])]
+    tables = [(it, True) for it in (getattr(doc, "tables", None) or [])]
+    count = 0
+    for item, is_table in texts + tables:
+        prov = getattr(item, "prov", None)
+        if not prov:
+            continue
+        page_no = prov[0].page_no
+        if page_no not in image_backed or page_no not in page_data:
+            continue
+        if not is_table and getattr(item, "label", None) == DocItemLabel.FORMULA:
+            continue
+        regions, pw, ph = page_data[page_no]
+        box = _norm_tl(prov[0].bbox, pw, ph)
+        # Tables snap to the visual table region; text/furniture to a non-table region. Fall back to
+        # any region so an element is never left on its clipped box when a same-kind match is missing.
+        same_kind = [r for r in regions if (r[0] == "table") == is_table]
+        reg = _best_region(box, same_kind) or _best_region(box, regions)
+        if reg:
+            _set_prov_bbox_from_norm(item, reg[1], pw, ph)
+            count += 1
+    return count
+
+
 def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
     """PDF (path or bytes) → host-server contract `{markdown_pages, structured_document}`.
 
@@ -954,10 +988,10 @@ def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
                     if not reconcile or _is_garbled_text(item.text or ""):
                         item.text = reg[2]
                         item.orig = reg[2]
-                    # Scanned page: adopt the OCR region's (visual) bbox so the overlay box hugs the
-                    # rendered ink instead of Docling's reduced embedded-text-cell box (which clips it).
-                    if page_no in image_backed:
-                        _set_prov_bbox_from_norm(item, reg[1], pw, ph)
+                    # NOTE: scanned-page bbox snapping is NOT done here — it runs as a unified pass
+                    # (`_snap_scanned_geometry`) AFTER residual-ink picture detection, so it covers
+                    # furniture (header/footer, which `iterate_items` skips) and tables too, and can't
+                    # erase a residual-ink figure by pre-growing a text box over it.
                     consumed.add(id(reg))
 
         # Second pass: recover regions Docling's layout under-segmented. Full-page OCR sometimes
@@ -1039,6 +1073,12 @@ def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
     page_pics = _add_scanned_page_pictures(doc, native_chars_by_page, page_images)
     if page_pics:
         logger.debug("added %d residual-ink picture(s) on scanned/image-dominated page(s)", page_pics)
+
+    # Now (after picture detection) align every scanned-page element — body text, furniture
+    # (header/footer), and tables — to its visual OCR-region geometry so the overlay boxes hug the ink.
+    snapped = _snap_scanned_geometry(doc, page_data, image_backed)
+    if snapped:
+        logger.debug("snapped %d scanned-page element(s) to visual OCR geometry", snapped)
 
     page_nos = sorted(doc.pages)
     markdown_pages = (
