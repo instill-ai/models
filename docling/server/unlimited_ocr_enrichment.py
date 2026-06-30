@@ -839,6 +839,7 @@ def _snap_scanned_geometry(doc: DoclingDocument, page_data: dict, image_backed: 
     # region extends ABOVE / BELOW Docling's clipped box. Reused to expand table cells (below), which
     # carry their own clipped box and have no per-cell OCR region to snap to.
     pads: dict = {}
+    unmatched: list = []  # scanned text/furniture that found NO OCR region → expand by page pad below
     for item, is_table in texts + tables:
         prov = getattr(item, "prov", None)
         if not prov:
@@ -855,6 +856,8 @@ def _snap_scanned_geometry(doc: DoclingDocument, page_data: dict, image_backed: 
         same_kind = [r for r in regions if (r[0] == "table") == is_table]
         reg = _best_region(box, same_kind) or _best_region(box, regions)
         if not reg:
+            if not is_table:
+                unmatched.append((item, page_no))  # e.g. a footer the OCR emitted no region for
             continue
         if not is_table:  # box=[l,t,r,b] 0..1 TL; reg[1] likewise — record how much the box must grow
             tp, bp = (box[1] - reg[1][1]) * ph, (reg[1][3] - box[3]) * ph
@@ -864,6 +867,25 @@ def _snap_scanned_geometry(doc: DoclingDocument, page_data: dict, image_backed: 
         count += 1
     if _TABLE_CELL_EXPAND:
         count += _expand_table_cells(tables, image_backed, pads)
+        # Furniture/text with no OCR region (footer-snap is flaky across pages) → un-clip by the same
+        # page-median expansion, so every scanned-page box hugs its ink regardless of OCR coverage.
+        for item, page_no in unmatched:
+            plist = pads.get(page_no)
+            if not plist:
+                continue
+            b = item.prov[0].bbox
+            h = abs(b.t - b.b)
+            tp, bp = min(_median([p[0] for p in plist]), h), min(_median([p[1] for p in plist]), h)
+            if tp <= 0 and bp <= 0:
+                continue
+            is_bl = getattr(b.coord_origin, "value", b.coord_origin) == CoordOrigin.BOTTOMLEFT.value
+            item.prov[0].bbox = BoundingBox(
+                l=b.l, r=b.r,
+                t=b.t + tp if is_bl else b.t - tp,
+                b=b.b - bp if is_bl else b.b + bp,
+                coord_origin=b.coord_origin,
+            )
+            count += 1
     return count
 
 
