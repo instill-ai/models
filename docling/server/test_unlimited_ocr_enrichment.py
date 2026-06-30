@@ -22,6 +22,7 @@ from unlimited_ocr_enrichment import (
     _build_doc_from_grounded,
     _center_in_any,
     _correct_furniture_labels,
+    _dedup_formula_latex,
     _enrich_formulas,
     _html_to_grid,
     _inject_formulas,
@@ -806,3 +807,25 @@ def test_multicolumn_author_block_each_author_grounded_in_its_own_column():
         assert not any(o in txt for o in others), f"{name} node merges another author: {txt!r}"
         # grounded in its own column
         assert lo < node.prov[0].bbox.l < hi, f"{name} mis-grounded at l={node.prov[0].bbox.l:.0f}"
+
+
+def test_dedup_formula_latex_drops_codeformula_repetition():
+    # CodeFormula's greedy decode loops on a single equation crop, re-emitting it as a second align row
+    # with the SAME LHS (often the corrupted copy: LC/8 → 1/8) via a junk \intertext. Keep only the first.
+    looped = (
+        r"\mathbb { E } _ { \pi } | R _ { \pi } ( x ) | & \leq \frac { L C } { 8 } ( \log n - \frac { 3 } { 2 } + o ( 1 ) )"
+        r" \\ \intertext { E } "
+        r"\mathbb { E } _ { \pi } | R _ { \pi } ( x ) | & \leq \frac { 1 } { 8 } ( \log n - \frac { 3 } { 2 } + o ( 1 ) )"
+    )
+    out = _dedup_formula_latex(looped)
+    assert "\\intertext" not in out
+    assert out.count(r"\leq") == 1  # only one row survives
+    assert r"\frac { L C } { 8 }" in out  # the first (correct) row is kept
+    assert r"\frac { 1 } { 8 }" not in out  # the corrupted duplicate is gone
+
+    # Genuine multi-row equations are NOT touched.
+    distinct = r"f ( x ) & = a + b \\ g ( x ) & = c + d"
+    assert _dedup_formula_latex(distinct) == distinct
+    cont = r"y & = a + b \\ & = c + d"  # empty-LHS continuation row
+    assert _dedup_formula_latex(cont) == cont
+    assert _dedup_formula_latex(r"a = b + c") == r"a = b + c"  # single row
