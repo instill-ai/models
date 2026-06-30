@@ -24,6 +24,7 @@ import io
 import logging
 import os
 import re
+import string
 from collections.abc import Callable
 from html.parser import HTMLParser
 from typing import List, Optional, Tuple, Union
@@ -67,6 +68,84 @@ _DIGITAL_FASTPATH = (
     not in ("0", "false", "no", "off")
 )
 _MIN_DIGITAL_TEXT_CHARS = int(os.environ.get("SHUBO_DOCLING_MIN_DIGITAL_CHARS", "100"))
+
+# ── garbled embedded-span reconcile (hybrid digital + handwriting pages) ─────────────────────────
+# A HYBRID page is a clean, digitally-generated page (e.g. a DocuSign-stamped agreement) that ALSO
+# carries a line some UPSTREAM tool already OCR'd into the PDF text layer as garbage — a handwritten
+# "Dated: 12 December 2022" stored as the embedded span "Dated:  I 2- D e lo cf.,r  Zo  ZZ". The page
+# sails over the digital-text char floor above, so the blind fast path TRUSTS that garbled span and
+# never OCR's it — the date is lost. The MLX whole-page OCR reads that exact cursive correctly, so the
+# fix is to reconcile: when a digital page carries garbled span(s), run the whole-page OCR for THAT
+# page only and replace each garbled element's text with the matching OCR region, while keeping every
+# clean digital element (and long alphanumeric IDs) verbatim. Clean digital pages never trip this, so
+# they keep the zero-cost fast path. Killswitch via env for safe A/B in deploy.
+_RECONCILE_GARBLED = (
+    os.environ.get("SHUBO_DOCLING_RECONCILE_GARBLED", "1").strip().lower()
+    not in ("0", "false", "no", "off")
+)
+# Detector thresholds (token-level so a long no-space alphanumeric ID is never mistaken for garbage).
+_GARBLE_MIN_TOKENS = 4  # too few whitespace tokens to judge reliably → never flagged (clean labels)
+_GARBLE_WORD_FLOOR = 0.5  # necessary gate: a span with >=50% real-word/ID tokens is NOT garbled
+_GARBLE_SINGLE_CHAR_MIN = 0.2  # >=20% bare single-char tokens ("I","D","e") → cursive split per glyph
+_GARBLE_SHORT_MIN = 0.5  # >=50% <=2-char tokens → heavy fragmentation
+_WORD_RUN = re.compile(r"[^\W\d_]{3,}")  # a run of >=3 letters (a real word, unicode-aware)
+_LONG_ALNUM = re.compile(r"[A-Za-z0-9]{5,}")  # a long no-space alphanumeric token (e.g. a DocuSign ID)
+_PUNCT_RUN = re.compile(r"[^\w\s]{2,}")  # a run of >=2 consecutive punctuation marks ("cf.,r")
+
+
+def _is_garbled_text(text: str) -> bool:
+    """Score an embedded text span as garbled/low-quality OCR (vs clean digital prose or an ID).
+
+    Robust token-level heuristic tuned against real DocuSign-page spans:
+      garbled  "Dated:  I 2- D e lo cf.,r  Zo  ZZ"  (handwriting an upstream tool glyph-split)
+      clean    "Name of Director: Ping-Lin Chang"   (digital prose)
+      clean    "DocuSign Envelope ID: A7E30573-..." (a long no-space alphanumeric ID — never flagged)
+
+    A span is garbled only when it has enough tokens, FEW real words/IDs (`word_like_ratio` below the
+    floor — the necessary gate that protects clean text and IDs), AND a strong fragmentation signal:
+    many single-character tokens, mostly <=2-char tokens, or a broken punctuation run. Operating on
+    whitespace tokens (never raw characters) is what keeps a long ID a single, clearly-good token.
+    """
+    s = (text or "").strip()
+    if not s:
+        return False
+    tokens = s.split()
+    n = len(tokens)
+    if n < _GARBLE_MIN_TOKENS:
+        return False
+    word_like = single_char = short = 0
+    broken_punct = False
+    for tok in tokens:
+        core = tok.strip(string.punctuation)
+        if _WORD_RUN.search(tok) or _LONG_ALNUM.search(tok):
+            word_like += 1
+        if len(core) == 1 and core.isalnum():
+            single_char += 1
+        if len(core) <= 2:
+            short += 1
+        if _PUNCT_RUN.search(tok):
+            broken_punct = True
+    if word_like / n >= _GARBLE_WORD_FLOOR:
+        return False
+    return (
+        single_char / n >= _GARBLE_SINGLE_CHAR_MIN
+        or short / n >= _GARBLE_SHORT_MIN
+        or broken_punct
+    )
+
+
+def _pages_with_garbled_spans(doc: DoclingDocument) -> set:
+    """Page numbers carrying at least one garbled embedded TextItem span (the reconcile trigger).
+    FORMULA leaves are excluded — their text is CodeFormula LaTeX, not an embedded-layer span."""
+    pages: set = set()
+    for item, _ in doc.iterate_items():
+        if not isinstance(item, TextItem) or item.label == DocItemLabel.FORMULA:
+            continue
+        prov = getattr(item, "prov", None)
+        if prov and _is_garbled_text(item.text or ""):
+            pages.add(prov[0].page_no)
+    return pages
+
 
 # ── formula enrichment (CodeFormula → LaTeX) ─────────────────────────────────────────────────────
 # Docling's layout detects FORMULA regions VISUALLY (works on both digital and scanned pages — proven
@@ -580,24 +659,35 @@ def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
     # and are simply absent from page_data (the mapping below is a no-op for them). Scanned / empty
     # -layer pages fall through to OCR exactly as before.
     digital_chars = _digital_text_chars_by_page(doc) if _DIGITAL_FASTPATH else {}
+    # Hybrid-page reconcile: pages classified digital that ALSO carry a garbled embedded span (e.g. a
+    # handwritten date an upstream tool OCR'd into the text layer as garbage). Those are NOT skipped —
+    # they get the whole-page OCR so the garbled span(s) can be replaced, while clean spans are kept.
+    garbled_pages = (
+        _pages_with_garbled_spans(doc) if (_DIGITAL_FASTPATH and _RECONCILE_GARBLED) else set()
+    )
     page_data: dict = {}
+    reconcile_pages: set = set()  # digital pages OCR'd ONLY to fix garbled spans (clean spans kept)
     skipped_digital = 0
     for page_no in sorted(doc.pages):
         page = doc.pages[page_no]
         img = page.image.pil_image if (page.image is not None) else None
         if img is None or page.size is None:
             continue
-        if _DIGITAL_FASTPATH and digital_chars.get(page_no, 0) >= _MIN_DIGITAL_TEXT_CHARS:
+        is_digital = _DIGITAL_FASTPATH and digital_chars.get(page_no, 0) >= _MIN_DIGITAL_TEXT_CHARS
+        if is_digital and page_no not in garbled_pages:
             skipped_digital += 1
-            continue  # usable digital text layer → keep Docling's exact text, skip MLX OCR
+            continue  # clean digital text layer → keep Docling's exact text, skip MLX OCR (zero cost)
         page_data[page_no] = (
             parse_grounded_regions(ocr_raw(img)),
             float(page.size.width),
             float(page.size.height),
         )
+        if is_digital:
+            reconcile_pages.add(page_no)  # hybrid page: OCR only to overwrite the garbled span(s)
     logger.debug(
-        "digital-text fast path: %d/%d page(s) used the embedded layer (OCR skipped); %d OCR'd",
-        skipped_digital, len(doc.pages), len(page_data),
+        "digital-text fast path: %d/%d page(s) used the embedded layer (OCR skipped); %d OCR'd "
+        "(%d hybrid reconcile)",
+        skipped_digital, len(doc.pages), len(page_data), len(reconcile_pages),
     )
 
     # Does Docling's layout carry usable structure? Digital PDFs: yes. Image-only PDFs: no text
@@ -637,7 +727,12 @@ def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
             regions, pw, ph = page_data[page_no]
             box = _norm_tl(prov[0].bbox, pw, ph)
             elem_boxes.setdefault(page_no, []).append(box)
+            reconcile = page_no in reconcile_pages
             if isinstance(item, TableItem):
+                # On a hybrid reconcile page the table cells are clean digital text → keep them; the
+                # reconcile only targets garbled body spans. Scanned pages fill the grid from OCR.
+                if reconcile:
+                    continue
                 treg = _best_region(box, [r for r in regions if r[0] == "table"]) or _best_region(
                     box, regions
                 )
@@ -652,8 +747,12 @@ def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
                     continue
                 reg = _best_region(box, [r for r in regions if r[0] != "table"])
                 if reg and reg[2]:
-                    item.text = reg[2]
-                    item.orig = reg[2]
+                    # Hybrid reconcile page: overwrite ONLY garbled embedded spans with the OCR text;
+                    # keep clean digital text / IDs verbatim. Consume the region either way so the
+                    # recovery pass below never re-emits a clean kept element as a duplicate node.
+                    if not reconcile or _is_garbled_text(item.text or ""):
+                        item.text = reg[2]
+                        item.orig = reg[2]
                     consumed.add(id(reg))
 
         # Second pass: recover regions Docling's layout under-segmented. Full-page OCR sometimes
@@ -664,6 +763,11 @@ def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
         # runs for OCR'd pages (those in page_data); digital fast-path pages are absent → no-op.
         recovered = 0
         for page_no in sorted(page_data):
+            if page_no in reconcile_pages:
+                # Hybrid digital page: trust Docling's layout completely (only garbled spans were
+                # fixed in place). Recovering "unmapped" OCR regions here would duplicate the clean
+                # embedded text wherever the OCR segmented the page differently from the layout.
+                continue
             regions, pw, ph = page_data[page_no]
             boxes = elem_boxes.get(page_no, [])
             # Boxes of formulas Docling DETECTED and CodeFormula rendered to LaTeX (kept on their
