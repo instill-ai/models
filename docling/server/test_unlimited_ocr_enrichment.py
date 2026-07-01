@@ -866,6 +866,7 @@ def test_multicolumn_author_block_each_author_grounded_in_its_own_column():
     from unlimited_ocr_enrichment import (
         _coalesce_text_blocks,
         _attach_table_footnotes,
+    _recognize_structured_environments,
     _resegment_overflow_nodes,
         _structure_converter,
     )
@@ -953,3 +954,119 @@ def test_attach_table_footnotes_links_marked_note_below_table_only():
     assert n == 1
     refs = [r.cref for r in doc.tables[0].footnotes]
     assert refs == ["#/texts/0"]  # only the marked note directly below; prose + far note excluded
+
+
+def test_recognize_structured_environments_relabels_algorithm_and_box():
+    # An "Algorithm N …" / "Box N …" title Docling tags SECTION_HEADER is demoted to CAPTION (no more
+    # fake section / section_path pollution); an algorithm's pseudocode steps become CODE; ordinary
+    # prose after the algorithm and a box's bullet list are untouched.
+    from docling_core.types.doc import (
+        BoundingBox,
+        CoordOrigin,
+        DocItemLabel,
+        DoclingDocument,
+        ProvenanceItem,
+        Size,
+    )
+    from unlimited_ocr_enrichment import _recognize_structured_environments
+
+    doc = DoclingDocument(name="d")
+    doc.add_page(page_no=1, size=Size(width=595.0, height=842.0))
+
+    def prov():
+        return ProvenanceItem(
+            page_no=1,
+            bbox=BoundingBox(l=0, t=10, r=10, b=0, coord_origin=CoordOrigin.TOPLEFT),
+            charspan=(0, 1),
+        )
+
+    def add(label, text):
+        doc.add_text(label=label, text=text, orig=text, prov=prov())
+
+    add(DocItemLabel.SECTION_HEADER, "Algorithm 1 ISR gating with permutation mixture")
+    add(DocItemLabel.TEXT, "Require: Prompt x, target reliability h")
+    add(DocItemLabel.LIST_ITEM, "1: Sample permutations of evidence")
+    add(DocItemLabel.LIST_ITEM, "2: for k = 1 to m do")
+    add(DocItemLabel.LIST_ITEM, "15: end if")
+    add(DocItemLabel.TEXT, "ISR gate. If q = 0.10 the model answers.")  # prose — must stay text
+    add(DocItemLabel.SECTION_HEADER, "Box 1: Hallucination Prevention Metrics")
+    add(DocItemLabel.LIST_ITEM, "B2T(x) = KL(Ber(1-h))")  # a box bullet — stays list_item
+
+    n = _recognize_structured_environments(doc)
+    assert n >= 6
+    by = {(it.text or "")[:14]: it.label for it in doc.texts}
+    assert by["Algorithm 1 IS"] == DocItemLabel.CAPTION
+    assert by["Require: Promp"] == DocItemLabel.CODE
+    assert by["1: Sample perm"] == DocItemLabel.CODE
+    assert by["2: for k = 1 t"] == DocItemLabel.CODE
+    assert by["15: end if"] == DocItemLabel.CODE
+    assert by["ISR gate. If q"] == DocItemLabel.TEXT  # prose after the algorithm untouched
+    assert by["Box 1: Halluci"] == DocItemLabel.CAPTION
+    assert by["B2T(x) = KL(Be"] == DocItemLabel.LIST_ITEM  # box bullet unchanged
+    assert not any(it.label == DocItemLabel.SECTION_HEADER for it in doc.texts)
+
+
+def test_recognize_structured_environments_runs_on_grounded_rebuild_doc():
+    # Finding-1 regression guard: on a scanned / image-only page the doc is REBUILT wholesale by
+    # _build_doc_from_grounded, so the relabel pass must run on THAT doc (it is now wired after the
+    # rebuild, alongside _correct_furniture_labels). Build a grounded doc with an algorithm block and
+    # confirm the pass relabels it — the exact path that was a no-op when the call sat before the rebuild.
+    from docling_core.types.doc import DocItemLabel
+    from unlimited_ocr_enrichment import _build_doc_from_grounded, _recognize_structured_environments
+
+    regions = [
+        ("title", (0.05, 0.10, 0.80, 0.12), "Algorithm 1 Permutation-mixture ISR gating"),
+        ("list_item", (0.05, 0.14, 0.90, 0.16), "1: Sample permutations of evidence"),
+        ("list_item", (0.05, 0.17, 0.90, 0.19), "2: for k = 1 to m do"),
+        ("text", (0.05, 0.24, 0.90, 0.26), "We evaluate the gate on three benchmarks."),  # prose — stays
+    ]
+    doc = _build_doc_from_grounded({1: (regions, 1240.0, 1754.0)})
+    n = _recognize_structured_environments(doc)
+    assert n >= 3
+    by = {(it.text or "")[:12]: it.label for it in doc.texts}
+    assert by["Algorithm 1 "] == DocItemLabel.CAPTION
+    assert by["1: Sample pe"] == DocItemLabel.CODE
+    assert by["2: for k = 1"] == DocItemLabel.CODE
+    assert by["We evaluate "] == DocItemLabel.TEXT
+
+
+def test_recognize_structured_environments_handles_dotted_steps_and_listitem_keywords():
+    # Finding-3 hardening: "1." / "1)" numbered steps, and a Require:/Ensure: keyword line Docling
+    # tagged LIST_ITEM (not TEXT), are all recognized as algorithm steps — previously the number branch
+    # required "N:" and the keyword branch only fired on TEXT, truncating the CODE run early.
+    from docling_core.types.doc import (
+        BoundingBox,
+        CoordOrigin,
+        DocItemLabel,
+        DoclingDocument,
+        ProvenanceItem,
+        Size,
+    )
+    from unlimited_ocr_enrichment import _recognize_structured_environments
+
+    doc = DoclingDocument(name="d")
+    doc.add_page(page_no=1, size=Size(width=595.0, height=842.0))
+
+    def prov():
+        return ProvenanceItem(
+            page_no=1,
+            bbox=BoundingBox(l=0, t=10, r=10, b=0, coord_origin=CoordOrigin.TOPLEFT),
+            charspan=(0, 1),
+        )
+
+    def add(label, text):
+        doc.add_text(label=label, text=text, orig=text, prov=prov())
+
+    add(DocItemLabel.SECTION_HEADER, "Algorithm 2 Numbered with dots")
+    add(DocItemLabel.LIST_ITEM, "Require: input tensor X")  # keyword tagged LIST_ITEM (was missed)
+    add(DocItemLabel.LIST_ITEM, "1. initialize weights")  # "1." dotted (was missed)
+    add(DocItemLabel.LIST_ITEM, "2) forward pass")  # "2)" paren (was missed)
+    add(DocItemLabel.TEXT, "The results follow in Section 4.")  # prose — stays
+
+    _recognize_structured_environments(doc)
+    by = {(it.text or ""): it.label for it in doc.texts}
+    assert by["Algorithm 2 Numbered with dots"] == DocItemLabel.CAPTION
+    assert by["Require: input tensor X"] == DocItemLabel.CODE
+    assert by["1. initialize weights"] == DocItemLabel.CODE
+    assert by["2) forward pass"] == DocItemLabel.CODE
+    assert by["The results follow in Section 4."] == DocItemLabel.TEXT

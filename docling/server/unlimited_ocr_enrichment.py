@@ -1226,6 +1226,62 @@ def _attach_table_footnotes(doc: DoclingDocument) -> int:
     return attached
 
 
+# CS papers frame ALGORITHM (LaTeX algorithm/algorithmic) and BOXED-CALLOUT (tcolorbox/mdframed)
+# environments as a titled block, but Docling's layout mislabels the "Algorithm N …" / "Box N …" title
+# as a SECTION_HEADER (which then pollutes every following chunk's section_path breadcrumb, like the
+# "list" leak) and scatters the numbered pseudocode as bare list_items. Recognize the environment and
+# relabel: the title → caption (no longer a fake section), the pseudocode steps → code. Gated.
+_STRUCTURED_ENV = (
+    os.environ.get("SHUBO_DOCLING_STRUCTURED_ENV", "1").strip().lower()
+    not in ("0", "false", "no", "off")
+)
+_ENV_CAPTION_RE = re.compile(r"^\s*(Algorithm|Procedure|Listing|Box|Sidebar|Panel)\s+\d+\b", re.IGNORECASE)
+_ALGO_CAPTION_RE = re.compile(r"^\s*(Algorithm|Procedure|Listing)\s+\d+\b", re.IGNORECASE)
+_ALGO_STEP_NUM_RE = re.compile(r"^\s*\d+\s*[:.)]")  # "1:", "15: end if", "1.", "1)"
+_ALGO_STEP_KW_RE = re.compile(r"^\s*(Require|Ensure|Input|Output)\s*:", re.IGNORECASE)
+
+
+def _recognize_structured_environments(doc: DoclingDocument) -> int:
+    """Relabel algorithm / boxed-callout environments Docling mislabels. An "Algorithm N …" / "Box N …"
+    title that Docling tagged SECTION_HEADER is demoted to CAPTION (so it stops acting as a document
+    section + polluting section_path); for an ALGORITHM, the contiguous pseudocode steps that follow
+    (numbered list_items, or Require:/Ensure:/Input:/Output: text) are relabelled CODE. Strictly scoped
+    by the title regex + a contiguous, pattern-matched step run; ordinary prose is never touched.
+    Returns the number of nodes relabelled. Gated by `_STRUCTURED_ENV`."""
+    if not _STRUCTURED_ENV:
+        return 0
+    from docling_core.types.doc import DocItemLabel
+
+    texts = list(doc.texts)
+    n = len(texts)
+    changed = 0
+    for i, it in enumerate(texts):
+        if it.label != DocItemLabel.SECTION_HEADER:
+            continue
+        s = it.text or ""
+        if not _ENV_CAPTION_RE.match(s):
+            continue
+        it.label = DocItemLabel.CAPTION  # a fake section header → the environment's caption
+        changed += 1
+        if not _ALGO_CAPTION_RE.match(s):
+            continue  # a Box/callout title needs no step relabelling (its body is a normal list)
+        # Relabel the CONTIGUOUS pseudocode steps that follow (in reading order) → code.
+        for j in range(i + 1, n):
+            nt = texts[j]
+            ns = nt.text or ""
+            # A step is a numbered line ("1:", "1.", "1)") or a Require/Ensure/Input/Output keyword line.
+            # Docling tags these inconsistently as list_item OR text (e.g. a "Require:" line can land as
+            # either), so accept both labels for both step shapes rather than pairing one shape to one label.
+            is_step = nt.label in (DocItemLabel.LIST_ITEM, DocItemLabel.TEXT) and (
+                bool(_ALGO_STEP_NUM_RE.match(ns)) or bool(_ALGO_STEP_KW_RE.match(ns))
+            )
+            if not is_step:
+                break  # first non-step ends the algorithm body
+            nt.label = DocItemLabel.CODE
+            changed += 1
+    return changed
+
+
 def _set_prov_bbox_from_norm(item, norm_box: Tuple[float, float, float, float], pw: float, ph: float) -> None:
     """Replace a mapped element's geometry with a normalized 0..1 TOP-LEFT box (the matched OCR
     region's), converted to page coordinates — aligns a scanned-page element with the rendered page
@@ -1584,6 +1640,13 @@ def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
     # it covers both the grounded rebuild and the digital/structured path (which keeps layout labels
     # verbatim). Without this, a mislabeled content line is dropped from chunks by furniture chunking.
     _correct_furniture_labels(doc)
+
+    # Recognize algorithm / boxed-callout environments Docling mislabels (an "Algorithm/Box N ..." title
+    # tagged section_header; pseudocode steps tagged list_items). MUST run on the FINAL doc — like the
+    # furniture pass above — so it covers BOTH the digital/structured path and the grounded-rebuild
+    # (scanned/image-only) path: before the rebuild a scanned page has no body text, so the pass is a
+    # no-op there and the wholesale rebuild would then discard it.
+    _recognize_structured_environments(doc)
 
     # Scanned/image-dominated pages: box each non-text graphic (signature/stamp/figure) via residual-
     # ink detection, so it reaches the visual-description pipeline with a TIGHT bbox. Runs on the FINAL
