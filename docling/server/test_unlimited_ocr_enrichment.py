@@ -905,7 +905,7 @@ def test_recognize_structured_environments_relabels_algorithm_and_box():
     add(DocItemLabel.SECTION_HEADER, "Box 1: Hallucination Prevention Metrics")
     add(DocItemLabel.LIST_ITEM, "B2T(x) = KL(Ber(1-h))")  # a box bullet — stays list_item
 
-    n = _recognize_structured_environments(doc)
+    n, _blocks = _recognize_structured_environments(doc)
     assert n >= 6
     by = {(it.text or "")[:14]: it.label for it in doc.texts}
     assert by["Algorithm 1 IS"] == DocItemLabel.CAPTION
@@ -934,7 +934,7 @@ def test_recognize_structured_environments_runs_on_grounded_rebuild_doc():
         ("text", (0.05, 0.24, 0.90, 0.26), "We evaluate the gate on three benchmarks."),  # prose — stays
     ]
     doc = _build_doc_from_grounded({1: (regions, 1240.0, 1754.0)})
-    n = _recognize_structured_environments(doc)
+    n, _blocks = _recognize_structured_environments(doc)
     assert n >= 3
     by = {(it.text or "")[:12]: it.label for it in doc.texts}
     assert by["Algorithm 1 "] == DocItemLabel.CAPTION
@@ -983,3 +983,105 @@ def test_recognize_structured_environments_handles_dotted_steps_and_listitem_key
     assert by["1. initialize weights"] == DocItemLabel.CODE
     assert by["2) forward pass"] == DocItemLabel.CODE
     assert by["The results follow in Section 4."] == DocItemLabel.TEXT
+
+
+def test_group_structured_environments_wraps_algorithm_block():
+    # Phase 2: the algorithm's caption + CODE steps are wrapped into ONE UNSPECIFIED group placed at the
+    # caption's reading position; a Box (no steps) and a following prose node stay outside the group.
+    from docling_core.types.doc import (
+        BoundingBox,
+        CoordOrigin,
+        DocItemLabel,
+        DoclingDocument,
+        GroupLabel,
+        ProvenanceItem,
+        Size,
+    )
+    from unlimited_ocr_enrichment import (
+        _group_structured_environments,
+        _recognize_structured_environments,
+    )
+
+    doc = DoclingDocument(name="d")
+    doc.add_page(page_no=1, size=Size(width=595.0, height=842.0))
+
+    def prov():
+        return ProvenanceItem(
+            page_no=1,
+            bbox=BoundingBox(l=0, t=10, r=10, b=0, coord_origin=CoordOrigin.TOPLEFT),
+            charspan=(0, 1),
+        )
+
+    def add(label, text):
+        return doc.add_text(label=label, text=text, orig=text, prov=prov())
+
+    title = add(DocItemLabel.SECTION_HEADER, "Algorithm 1 Do the thing")
+    s1 = add(DocItemLabel.LIST_ITEM, "1: first step")
+    s2 = add(DocItemLabel.LIST_ITEM, "2: second step")
+    prose = add(DocItemLabel.TEXT, "This paragraph follows the algorithm.")
+    box = add(DocItemLabel.SECTION_HEADER, "Box 1: A callout")  # no steps → caption only, not grouped
+
+    _changed, blocks = _recognize_structured_environments(doc)
+    made = _group_structured_environments(doc, blocks)
+
+    assert made == 1  # only the algorithm is wrapped; the Box (no steps) is not
+    grp = doc.groups[-1]
+    assert grp.label == GroupLabel.UNSPECIFIED
+    assert [c.cref for c in grp.children] == [title.self_ref, s1.self_ref, s2.self_ref]
+    body = [c.cref for c in doc.body.children]
+    assert grp.self_ref in body  # group sits where the caption was
+    assert s1.self_ref not in body and s2.self_ref not in body  # steps moved under the group
+    assert prose.self_ref in body and box.self_ref in body
+    assert body.index(grp.self_ref) < body.index(prose.self_ref)  # order preserved
+    assert title.parent.cref == grp.self_ref and s1.parent.cref == grp.self_ref
+    assert title.label == DocItemLabel.CAPTION and s1.label == DocItemLabel.CODE
+
+
+def test_group_structured_environments_pulls_steps_out_of_list_group():
+    # Real Docling nests the numbered steps in a ListGroup; the wrap must pull them out and drop the
+    # now-empty list group from reading order (else the steps would be double-parented).
+    from docling_core.types.doc import (
+        BoundingBox,
+        CoordOrigin,
+        DocItemLabel,
+        DoclingDocument,
+        GroupLabel,
+        ProvenanceItem,
+        RefItem,
+        Size,
+    )
+    from unlimited_ocr_enrichment import (
+        _group_structured_environments,
+        _recognize_structured_environments,
+    )
+
+    doc = DoclingDocument(name="d")
+    doc.add_page(page_no=1, size=Size(width=595.0, height=842.0))
+
+    def prov():
+        return ProvenanceItem(
+            page_no=1,
+            bbox=BoundingBox(l=0, t=10, r=10, b=0, coord_origin=CoordOrigin.TOPLEFT),
+            charspan=(0, 1),
+        )
+
+    title = doc.add_text(label=DocItemLabel.SECTION_HEADER, text="Algorithm 1 X", orig="Algorithm 1 X", prov=prov())
+    lg = doc.add_group(label=GroupLabel.LIST, name="list")
+    s1 = doc.add_text(label=DocItemLabel.LIST_ITEM, text="1: a", orig="1: a", prov=prov())
+    s2 = doc.add_text(label=DocItemLabel.LIST_ITEM, text="2: b", orig="2: b", prov=prov())
+    # nest the steps under the list group (as Docling does)
+    doc.body.children = [c for c in doc.body.children if c.cref not in (s1.self_ref, s2.self_ref)]
+    lg.children = [RefItem(cref=s1.self_ref), RefItem(cref=s2.self_ref)]
+    s1.parent = RefItem(cref=lg.self_ref)
+    s2.parent = RefItem(cref=lg.self_ref)
+
+    _changed, blocks = _recognize_structured_environments(doc)
+    made = _group_structured_environments(doc, blocks)
+
+    assert made == 1
+    body = [c.cref for c in doc.body.children]
+    assert lg.self_ref not in body  # emptied list group dropped from reading order
+    assert lg.children == []
+    grp = doc.groups[-1]
+    assert [c.cref for c in grp.children] == [title.self_ref, s1.self_ref, s2.self_ref]
+    assert s1.parent.cref == grp.self_ref
