@@ -22,6 +22,7 @@ from unlimited_ocr_enrichment import (
     _build_doc_from_grounded,
     _center_in_any,
     _correct_furniture_labels,
+    _reorder_author_block,
     _dedup_formula_latex,
     _enrich_formulas,
     _html_to_grid,
@@ -295,6 +296,92 @@ def test_correct_furniture_labels_demotes_body_mislabels():
     assert real_footer.label == DocItemLabel.PAGE_FOOTER
     assert real_header.label == DocItemLabel.PAGE_HEADER
     assert page_num.label == DocItemLabel.PAGE_FOOTER
+
+
+def test_reorder_author_block_rethreads_scattered_columns():
+    # Docling scatters a 3-up author row three ways: the left column stays in body.children, the right
+    # column lands in a key_value_area group, and (after the multi-column re-split) the center column is
+    # appended to the document TAIL. _reorder_author_block must pull all three back into one contiguous,
+    # left→right run right after the title — the fix for the "co-author's affiliation is the last node".
+    from docling_core.types.doc import (
+        BoundingBox,
+        CoordOrigin,
+        DocItemLabel,
+        DoclingDocument,
+        GroupLabel,
+        ProvenanceItem,
+        RefItem,
+        Size,
+    )
+
+    doc = DoclingDocument(name="t")
+    doc.add_page(page_no=1, size=Size(width=100.0, height=100.0))
+
+    def add(label, text, top, bot, left, right):
+        prov = ProvenanceItem(
+            page_no=1,
+            bbox=BoundingBox(l=left, t=top, r=right, b=bot, coord_origin=CoordOrigin.TOPLEFT),
+            charspan=(0, len(text)),
+        )
+        return doc.add_text(label=label, text=text, orig=text, prov=prov)
+
+    # add order puts the CENTER author (Tim) at the document tail, after the abstract.
+    title = add(DocItemLabel.SECTION_HEADER, "RECURSIVE LANGUAGE MODELS", 10.0, 15.0, 10.0, 90.0)
+    alex = add(DocItemLabel.TEXT, "Alex L. Zhang MIT CSAIL a@mit.edu", 20.0, 30.0, 10.0, 30.0)
+    omar = add(DocItemLabel.TEXT, "Omar Khattab MIT CSAIL o@mit.edu", 20.0, 30.0, 75.0, 95.0)
+    abstract = add(DocItemLabel.SECTION_HEADER, "ABSTRACT", 40.0, 45.0, 10.0, 90.0)
+    tim = add(DocItemLabel.TEXT, "Tim Kraska MIT CSAIL t@mit.edu", 20.0, 30.0, 40.0, 60.0)
+
+    # bury the RIGHT column (Omar) in a key_value_area group sitting mid-document.
+    grp = doc.add_group(label=GroupLabel.KEY_VALUE_AREA)
+    doc.body.children = [c for c in doc.body.children if c.cref not in (omar.self_ref, grp.self_ref)]
+    grp.children = [RefItem(cref=omar.self_ref)]
+    omar.parent = RefItem(cref=grp.self_ref)
+    doc.body.children.append(RefItem(cref=grp.self_ref))
+
+    moved = _reorder_author_block(doc)
+    order = [c.cref for c in doc.body.children]
+
+    assert moved == 3
+    # contiguous, spatial left→right, right after the title; abstract still follows the authors
+    assert order.index(title.self_ref) + 1 == order.index(alex.self_ref)
+    assert order.index(alex.self_ref) + 1 == order.index(tim.self_ref)
+    assert order.index(tim.self_ref) + 1 == order.index(omar.self_ref)
+    assert order.index(omar.self_ref) < order.index(abstract.self_ref)
+    assert grp.self_ref not in order  # emptied group dropped from reading order
+    assert omar.parent.cref == doc.body.self_ref  # reparented to body
+
+
+def test_reorder_author_block_leaves_single_column_byline_untouched():
+    # A single-column byline is already in reading order — the pass must be a no-op (no churn).
+    from docling_core.types.doc import (
+        BoundingBox,
+        CoordOrigin,
+        DocItemLabel,
+        DoclingDocument,
+        ProvenanceItem,
+        Size,
+    )
+
+    doc = DoclingDocument(name="t")
+    doc.add_page(page_no=1, size=Size(width=100.0, height=100.0))
+
+    def add(label, text, top, bot, left, right):
+        prov = ProvenanceItem(
+            page_no=1,
+            bbox=BoundingBox(l=left, t=top, r=right, b=bot, coord_origin=CoordOrigin.TOPLEFT),
+            charspan=(0, len(text)),
+        )
+        return doc.add_text(label=label, text=text, orig=text, prov=prov)
+
+    add(DocItemLabel.SECTION_HEADER, "A TITLE", 10.0, 15.0, 10.0, 90.0)
+    add(DocItemLabel.TEXT, "One Author, One Affiliation", 20.0, 25.0, 10.0, 60.0)
+    add(DocItemLabel.SECTION_HEADER, "ABSTRACT", 40.0, 45.0, 10.0, 90.0)
+
+    before = [c.cref for c in doc.body.children]
+    moved = _reorder_author_block(doc)
+    assert moved == 0
+    assert [c.cref for c in doc.body.children] == before
 
 
 # ── formula enrichment: pure helpers (no model) ───────────────────────────────────────────────

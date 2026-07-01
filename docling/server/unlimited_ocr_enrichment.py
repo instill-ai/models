@@ -1081,6 +1081,94 @@ def _coalesce_text_blocks(doc: DoclingDocument, source: Union[str, bytes]) -> in
     return merged
 
 
+# Docling scatters a multi-column author/byline row — the band between the paper title and the first
+# heading that follows (ABSTRACT/INTRODUCTION) — across THREE places: body.children (the left column),
+# a key_value_area group (Docling reads a name/affiliation/email column as key-value), and, once
+# _resegment_overflow_nodes splits a threaded column, the TAIL of the document (add_text appends there).
+# The dashboard then shows a co-author's affiliation as the last node in the paper. Collect every text
+# node in that band on page 1 and re-thread them contiguously in body.children, in spatial reading order
+# (row top→bottom, then column left→right), right after the title. No-op unless a clear title→heading
+# band with ≥2 horizontally-separated text nodes exists, so single-column bylines and non-academic docs
+# are never touched. Killswitch + the min horizontal spread (pt) that counts as multi-column.
+_AUTHOR_REORDER = (
+    os.environ.get("SHUBO_DOCLING_AUTHOR_REORDER", "1").strip().lower()
+    not in ("0", "false", "no", "off")
+)
+_AUTHOR_COL_SPREAD = float(os.environ.get("SHUBO_DOCLING_AUTHOR_COL_SPREAD", "60"))
+_AUTHOR_ROW_TOL = float(os.environ.get("SHUBO_DOCLING_AUTHOR_ROW_TOL", "16"))
+
+
+def _reorder_author_block(doc: DoclingDocument) -> int:
+    """Re-thread a scattered multi-column author/byline row into correct reading order (see the note
+    above for why Docling scatters it). Pulls the band nodes out of whatever body/group they landed in
+    and re-inserts them, spatially ordered, right after the title. Returns the number of nodes moved
+    (0 = no multi-column author band found, or it was single-column and already ordered)."""
+    if not _AUTHOR_REORDER:
+        return 0
+    try:
+        from docling_core.types.doc import CoordOrigin, DocItemLabel, RefItem
+    except Exception:  # noqa: BLE001
+        return 0
+
+    def _vscore(item) -> float:  # larger = higher on the page, regardless of coord origin
+        b = item.prov[0].bbox
+        o = getattr(b.coord_origin, "value", b.coord_origin)
+        cy = (b.t + b.b) / 2.0
+        return cy if o == CoordOrigin.BOTTOMLEFT.value else -cy
+
+    title_label = getattr(DocItemLabel, "TITLE", DocItemLabel.SECTION_HEADER)
+    header_labels = {DocItemLabel.SECTION_HEADER, title_label}
+    headers = [t for t in doc.texts if t.prov and t.prov[0].page_no == 1 and t.label in header_labels]
+    if len(headers) < 2:
+        return 0
+    headers.sort(key=_vscore, reverse=True)
+    title, stop = headers[0], headers[1]
+    top_v, bot_v = _vscore(title), _vscore(stop)
+    if top_v <= bot_v:
+        return 0
+
+    band = [
+        t
+        for t in doc.texts
+        if t.prov
+        and t.prov[0].page_no == 1
+        and t.label == DocItemLabel.TEXT
+        and bot_v < _vscore(t) < top_v
+    ]
+    if len(band) < 2:
+        return 0
+    lefts = [t.prov[0].bbox.l for t in band]
+    if max(lefts) - min(lefts) < _AUTHOR_COL_SPREAD:
+        return 0  # single column — Docling read it in order; leave it
+
+    # reading order: rows top→bottom (bucket vscore so a row's slight skew stays one row), then left→right
+    band.sort(key=lambda t: (-round(_vscore(t) / _AUTHOR_ROW_TOL), t.prov[0].bbox.l))
+    band_refs = {t.self_ref for t in band}
+
+    # unlink the band nodes from wherever they currently live, emptying (and later dropping) any group
+    # that held only band nodes.
+    emptied = []
+    for grp in doc.groups:
+        kids = [c for c in grp.children if c.cref not in band_refs]
+        if len(kids) != len(grp.children):
+            grp.children = kids
+            if not kids:
+                emptied.append(grp.self_ref)
+    drop = band_refs | set(emptied)
+    doc.body.children = [c for c in doc.body.children if c.cref not in drop]
+
+    # re-insert contiguously right after the title, in spatial order
+    try:
+        ti = next(i for i, c in enumerate(doc.body.children) if c.cref == title.self_ref)
+    except StopIteration:
+        ti = -1
+    doc.body.children[ti + 1 : ti + 1] = [RefItem(cref=t.self_ref) for t in band]
+    body_ref = RefItem(cref=doc.body.self_ref)
+    for t in band:
+        t.parent = body_ref
+    return len(band)
+
+
 # Docling models Table.footnotes (like Table.captions) but its layout leaves it EMPTY, so a table
 # footnote ("∗ Self-consistency measured on Qwen2-7B only") floats as an unparented text leaf, detached
 # from the table it explains. Detect + attach it. Markers a footnote opens with; gap below the table.
@@ -1285,6 +1373,10 @@ def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
     # affiliation/email) so each author is ONE consistent node — split first, then re-join.
     _resegment_overflow_nodes(doc, source)
     _coalesce_text_blocks(doc, source)
+    # Re-thread a scattered multi-column author/byline row into correct reading order (Docling flings
+    # the columns across body.children, key_value_area groups, and — after the re-split above — the
+    # document tail). Runs after coalesce so each author is one node before it is placed.
+    _reorder_author_block(doc)
     # Attach detached table footnotes to their table (Docling leaves Table.footnotes empty).
     _attach_table_footnotes(doc)
 
