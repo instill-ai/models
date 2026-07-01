@@ -1241,20 +1241,24 @@ _ALGO_STEP_NUM_RE = re.compile(r"^\s*\d+\s*[:.)]")  # "1:", "15: end if", "1.", 
 _ALGO_STEP_KW_RE = re.compile(r"^\s*(Require|Ensure|Input|Output)\s*:", re.IGNORECASE)
 
 
-def _recognize_structured_environments(doc: DoclingDocument) -> int:
+def _recognize_structured_environments(doc: DoclingDocument):
     """Relabel algorithm / boxed-callout environments Docling mislabels. An "Algorithm N …" / "Box N …"
     title that Docling tagged SECTION_HEADER is demoted to CAPTION (so it stops acting as a document
     section + polluting section_path); for an ALGORITHM, the contiguous pseudocode steps that follow
     (numbered list_items, or Require:/Ensure:/Input:/Output: text) are relabelled CODE. Strictly scoped
     by the title regex + a contiguous, pattern-matched step run; ordinary prose is never touched.
-    Returns the number of nodes relabelled. Gated by `_STRUCTURED_ENV`."""
+
+    Returns ``(changed, blocks)`` where ``changed`` is the number of nodes relabelled and ``blocks`` is
+    a list of ``(caption_item, [step_items])`` in reading order (steps empty for a box/callout) — the
+    single source of truth for the Phase-2 grouping pass, so it never re-scans. Gated by `_STRUCTURED_ENV`."""
     if not _STRUCTURED_ENV:
-        return 0
+        return 0, []
     from docling_core.types.doc import DocItemLabel
 
     texts = list(doc.texts)
     n = len(texts)
     changed = 0
+    blocks = []
     for i, it in enumerate(texts):
         if it.label != DocItemLabel.SECTION_HEADER:
             continue
@@ -1263,23 +1267,91 @@ def _recognize_structured_environments(doc: DoclingDocument) -> int:
             continue
         it.label = DocItemLabel.CAPTION  # a fake section header → the environment's caption
         changed += 1
-        if not _ALGO_CAPTION_RE.match(s):
-            continue  # a Box/callout title needs no step relabelling (its body is a normal list)
-        # Relabel the CONTIGUOUS pseudocode steps that follow (in reading order) → code.
-        for j in range(i + 1, n):
-            nt = texts[j]
-            ns = nt.text or ""
-            # A step is a numbered line ("1:", "1.", "1)") or a Require/Ensure/Input/Output keyword line.
-            # Docling tags these inconsistently as list_item OR text (e.g. a "Require:" line can land as
-            # either), so accept both labels for both step shapes rather than pairing one shape to one label.
-            is_step = nt.label in (DocItemLabel.LIST_ITEM, DocItemLabel.TEXT) and (
-                bool(_ALGO_STEP_NUM_RE.match(ns)) or bool(_ALGO_STEP_KW_RE.match(ns))
-            )
-            if not is_step:
-                break  # first non-step ends the algorithm body
-            nt.label = DocItemLabel.CODE
-            changed += 1
-    return changed
+        steps = []
+        if _ALGO_CAPTION_RE.match(s):
+            # a Box/callout title needs no step relabelling (its body is a normal list) → steps stays []
+            # Relabel the CONTIGUOUS pseudocode steps that follow (in reading order) → code.
+            for j in range(i + 1, n):
+                nt = texts[j]
+                ns = nt.text or ""
+                # A step is a numbered line ("1:", "1.", "1)") or a Require/Ensure/Input/Output keyword
+                # line. Docling tags these inconsistently as list_item OR text (a "Require:" line can land
+                # as either), so accept both labels for both step shapes rather than pairing shape to label.
+                is_step = nt.label in (DocItemLabel.LIST_ITEM, DocItemLabel.TEXT) and (
+                    bool(_ALGO_STEP_NUM_RE.match(ns)) or bool(_ALGO_STEP_KW_RE.match(ns))
+                )
+                if not is_step:
+                    break  # first non-step ends the algorithm body
+                nt.label = DocItemLabel.CODE
+                steps.append(nt)
+                changed += 1
+        blocks.append((it, steps))
+    return changed, blocks
+
+
+# Phase 2 (ADR-0029 Part C): wrap each relabeled algorithm block (its CAPTION + contiguous CODE steps)
+# into ONE structural GroupItem so the block is a single addressable, hierarchical unit — like a Table
+# owning its caption + body — instead of loose siblings scattered in reading order. Independent sub-gate
+# so the (surgical, label-only) relabel above can ship / be A-B tested without the tree-restructuring.
+_STRUCTURED_ENV_GROUP = (
+    os.environ.get("SHUBO_DOCLING_STRUCTURED_ENV_GROUP", "1").strip().lower()
+    not in ("0", "false", "no", "off")
+)
+
+
+def _group_structured_environments(doc: DoclingDocument, blocks) -> int:
+    """Wrap each algorithm block from ``blocks`` (see _recognize_structured_environments) into one
+    GroupLabel.UNSPECIFIED GroupItem that owns the caption + CODE steps as children, in reading order.
+    UNSPECIFIED is deliberate — a neutral container with NO section semantics (SECTION/CHAPTER would
+    re-pollute section_path, the very thing the relabel fixes). GroupItem has no prov, so the block is
+    bounded purely by membership (orthogonal to every geometry pass). Re-parents the EXISTING nodes via
+    the direct-tree idiom (cf. _reorder_author_block); never renumbers #/texts/N. A box/callout (no CODE
+    steps) is left ungrouped. Returns the number of groups created. Gated by `_STRUCTURED_ENV_GROUP`."""
+    if not (_STRUCTURED_ENV_GROUP and blocks):
+        return 0
+    try:
+        from docling_core.types.doc import GroupItem, GroupLabel, RefItem
+    except Exception:  # noqa: BLE001
+        return 0
+
+    made = 0
+    for caption, steps in blocks:
+        if not steps:
+            continue  # box/callout: caption only, nothing to group
+        members = [caption, *steps]
+        step_refs = {s.self_ref for s in steps}
+        # the caption must be a direct body child to keep the block in place; if it is nested (rare),
+        # skip the wrap rather than guess a parent (the nodes stay relabeled, just ungrouped).
+        cap_idx = next((k for k, c in enumerate(doc.body.children) if c.cref == caption.self_ref), None)
+        if cap_idx is None:
+            continue
+        gref = f"#/groups/{len(doc.groups)}"
+        grp = GroupItem(
+            self_ref=gref,
+            parent=RefItem(cref=doc.body.self_ref),
+            label=GroupLabel.UNSPECIFIED,
+            name=(caption.text or "algorithm").strip()[:120],
+        )
+        doc.groups.append(grp)
+        # keep the block's reading position: the caption's slot in body.children becomes the group ref,
+        # then strip the step refs from body.children.
+        doc.body.children[cap_idx] = RefItem(cref=gref)
+        doc.body.children = [c for c in doc.body.children if c.cref not in step_refs]
+        # steps may have lived in a ListGroup; pull them out and drop any list group left empty.
+        for g in list(doc.groups):
+            if g.self_ref == gref:
+                continue
+            kept = [c for c in g.children if c.cref not in step_refs]
+            if len(kept) != len(g.children):
+                g.children = kept
+                if not kept:
+                    doc.body.children = [c for c in doc.body.children if c.cref != g.self_ref]
+        grp.children = [RefItem(cref=m.self_ref) for m in members]
+        gpref = RefItem(cref=gref)
+        for m in members:
+            m.parent = gpref
+        made += 1
+    return made
 
 
 def _set_prov_bbox_from_norm(item, norm_box: Tuple[float, float, float, float], pw: float, ph: float) -> None:
@@ -1646,7 +1718,9 @@ def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
     # furniture pass above — so it covers BOTH the digital/structured path and the grounded-rebuild
     # (scanned/image-only) path: before the rebuild a scanned page has no body text, so the pass is a
     # no-op there and the wholesale rebuild would then discard it.
-    _recognize_structured_environments(doc)
+    _changed, _algo_blocks = _recognize_structured_environments(doc)
+    # Phase 2: wrap each relabeled algorithm block into one group container (hierarchical unit).
+    _group_structured_environments(doc, _algo_blocks)
 
     # Scanned/image-dominated pages: box each non-text graphic (signature/stamp/figure) via residual-
     # ink detection, so it reaches the visual-description pipeline with a TIGHT bbox. Runs on the FINAL
