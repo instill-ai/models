@@ -778,7 +778,8 @@ def test_multicolumn_author_block_each_author_grounded_in_its_own_column():
     # each author ends up as ONE node (name + affiliation + email) grounded in its own column.
     from unlimited_ocr_enrichment import (
         _coalesce_text_blocks,
-        _resegment_overflow_nodes,
+        _attach_table_footnotes,
+    _resegment_overflow_nodes,
         _structure_converter,
     )
 
@@ -829,3 +830,39 @@ def test_dedup_formula_latex_drops_codeformula_repetition():
     cont = r"y & = a + b \\ & = c + d"  # empty-LHS continuation row
     assert _dedup_formula_latex(cont) == cont
     assert _dedup_formula_latex(r"a = b + c") == r"a = b + c"  # single row
+
+
+def test_attach_table_footnotes_links_marked_note_below_table_only():
+    # Docling leaves Table.footnotes empty; _attach_table_footnotes links a marker-prefixed note that
+    # sits directly below a table and within its x-span, and nothing else.
+    from docling_core.types.doc import (
+        BoundingBox,
+        CoordOrigin,
+        DocItemLabel,
+        DoclingDocument,
+        ProvenanceItem,
+        Size,
+        TableData,
+    )
+    from unlimited_ocr_enrichment import _attach_table_footnotes
+
+    doc = DoclingDocument(name="d")
+    doc.add_page(page_no=1, size=Size(width=595.0, height=842.0))
+
+    def prov(l, t, r, b):
+        return ProvenanceItem(
+            page_no=1,
+            bbox=BoundingBox(l=l, t=t, r=r, b=b, coord_origin=CoordOrigin.BOTTOMLEFT),
+            charspan=(0, 1),
+        )
+
+    # table spanning x=100..400, y bottom=150 / top=200
+    doc.add_table(data=TableData(num_rows=0, num_cols=0, table_cells=[]), prov=prov(100, 200, 400, 150))
+    doc.add_text(label=DocItemLabel.TEXT, text="∗ note about the table", orig="x", prov=prov(150, 149, 350, 141))
+    doc.add_text(label=DocItemLabel.TEXT, text="Ordinary paragraph below.", orig="x", prov=prov(150, 148, 350, 140))
+    doc.add_text(label=DocItemLabel.TEXT, text="∗ unrelated far note", orig="x", prov=prov(150, 60, 350, 52))
+
+    n = _attach_table_footnotes(doc)
+    assert n == 1
+    refs = [r.cref for r in doc.tables[0].footnotes]
+    assert refs == ["#/texts/0"]  # only the marked note directly below; prose + far note excluded
