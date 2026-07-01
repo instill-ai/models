@@ -1149,7 +1149,7 @@ _STRUCTURED_ENV = (
 )
 _ENV_CAPTION_RE = re.compile(r"^\s*(Algorithm|Procedure|Listing|Box|Sidebar|Panel)\s+\d+\b", re.IGNORECASE)
 _ALGO_CAPTION_RE = re.compile(r"^\s*(Algorithm|Procedure|Listing)\s+\d+\b", re.IGNORECASE)
-_ALGO_STEP_NUM_RE = re.compile(r"^\s*\d+\s*:")  # "1:", "15: end if"
+_ALGO_STEP_NUM_RE = re.compile(r"^\s*\d+\s*[:.)]")  # "1:", "15: end if", "1.", "1)"
 _ALGO_STEP_KW_RE = re.compile(r"^\s*(Require|Ensure|Input|Output)\s*:", re.IGNORECASE)
 
 
@@ -1181,9 +1181,12 @@ def _recognize_structured_environments(doc: DoclingDocument) -> int:
         for j in range(i + 1, n):
             nt = texts[j]
             ns = nt.text or ""
-            is_step = (
-                nt.label == DocItemLabel.LIST_ITEM and bool(_ALGO_STEP_NUM_RE.match(ns))
-            ) or (nt.label == DocItemLabel.TEXT and bool(_ALGO_STEP_KW_RE.match(ns)))
+            # A step is a numbered line ("1:", "1.", "1)") or a Require/Ensure/Input/Output keyword line.
+            # Docling tags these inconsistently as list_item OR text (e.g. a "Require:" line can land as
+            # either), so accept both labels for both step shapes rather than pairing one shape to one label.
+            is_step = nt.label in (DocItemLabel.LIST_ITEM, DocItemLabel.TEXT) and (
+                bool(_ALGO_STEP_NUM_RE.match(ns)) or bool(_ALGO_STEP_KW_RE.match(ns))
+            )
             if not is_step:
                 break  # first non-step ends the algorithm body
             nt.label = DocItemLabel.CODE
@@ -1340,8 +1343,6 @@ def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
     _coalesce_text_blocks(doc, source)
     # Attach detached table footnotes to their table (Docling leaves Table.footnotes empty).
     _attach_table_footnotes(doc)
-    # Recognize algorithm / boxed-callout environments Docling mislabels as section_header + list_items.
-    _recognize_structured_environments(doc)
 
     # NATIVE (pre-OCR) digital-text density per page, captured on the original layout doc before any
     # grounded rebuild replaces `doc`. Drives both the digital-text fast path and the scanned-page
@@ -1547,6 +1548,13 @@ def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
     # it covers both the grounded rebuild and the digital/structured path (which keeps layout labels
     # verbatim). Without this, a mislabeled content line is dropped from chunks by furniture chunking.
     _correct_furniture_labels(doc)
+
+    # Recognize algorithm / boxed-callout environments Docling mislabels (an "Algorithm/Box N ..." title
+    # tagged section_header; pseudocode steps tagged list_items). MUST run on the FINAL doc — like the
+    # furniture pass above — so it covers BOTH the digital/structured path and the grounded-rebuild
+    # (scanned/image-only) path: before the rebuild a scanned page has no body text, so the pass is a
+    # no-op there and the wholesale rebuild would then discard it.
+    _recognize_structured_environments(doc)
 
     # Scanned/image-dominated pages: box each non-text graphic (signature/stamp/figure) via residual-
     # ink detection, so it reaches the visual-description pipeline with a TIGHT bbox. Runs on the FINAL
