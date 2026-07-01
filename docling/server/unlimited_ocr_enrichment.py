@@ -1081,6 +1081,63 @@ def _coalesce_text_blocks(doc: DoclingDocument, source: Union[str, bytes]) -> in
     return merged
 
 
+# Docling models Table.footnotes (like Table.captions) but its layout leaves it EMPTY, so a table
+# footnote ("∗ Self-consistency measured on Qwen2-7B only") floats as an unparented text leaf, detached
+# from the table it explains. Detect + attach it. Markers a footnote opens with; gap below the table.
+_TABLE_FOOTNOTES = (
+    os.environ.get("SHUBO_DOCLING_TABLE_FOOTNOTES", "1").strip().lower()
+    not in ("0", "false", "no", "off")
+)
+_TABLE_FOOTNOTE_MARKERS = ("∗", "*", "†", "‡", "§", "¶", "⁎", "⋆")
+_TABLE_FOOTNOTE_GAP = float(os.environ.get("SHUBO_DOCLING_TABLE_FOOTNOTE_GAP", "24"))
+
+
+def _attach_table_footnotes(doc: DoclingDocument) -> int:
+    """Attach a table's footnote(s) to Table.footnotes (mirroring Docling's Table.captions edge), which
+    Docling's layout leaves empty. A text leaf is a footnote of a table when it is DIRECTLY BELOW the
+    table (its top within `_TABLE_FOOTNOTE_GAP` of the table's bottom), its center is WITHIN the table's
+    x-span, and it OPENS WITH A FOOTNOTE MARKER (∗ † ‡ § ¶ / leading *) or Docling already labels it
+    `footnote`. Strictly scoped by marker + geometry so ordinary prose below a table is never attached.
+    Returns the number of footnotes attached. Gated by `_TABLE_FOOTNOTES`."""
+    if not _TABLE_FOOTNOTES:
+        return 0
+    from docling_core.types.doc import DocItemLabel, RefItem
+
+    def _top(bb):
+        return max(bb.t, bb.b)
+
+    def _bot(bb):
+        return min(bb.t, bb.b)
+
+    attached = 0
+    for table in doc.tables:
+        if not table.prov:
+            continue
+        tp = table.prov[0]
+        tb = tp.bbox
+        if table.footnotes is None:
+            table.footnotes = []
+        seen = {r.cref for r in table.footnotes}
+        for it in doc.texts:
+            if not it.prov or it.prov[0].page_no != tp.page_no or it.self_ref in seen:
+                continue
+            txt = (it.text or "").lstrip()
+            is_footnote = it.label == DocItemLabel.FOOTNOTE or (bool(txt) and txt[0] in _TABLE_FOOTNOTE_MARKERS)
+            if not is_footnote:
+                continue
+            fb = it.prov[0].bbox
+            # directly below the table (footnote top near/just below the table's bottom edge)
+            if not (_bot(tb) - _TABLE_FOOTNOTE_GAP <= _top(fb) <= _bot(tb) + 2.0):
+                continue
+            fcx = (fb.l + fb.r) / 2.0  # horizontally within the table's column span
+            if not (tb.l - 2.0 <= fcx <= tb.r + 2.0):
+                continue
+            table.footnotes.append(RefItem(cref=it.self_ref))
+            seen.add(it.self_ref)
+            attached += 1
+    return attached
+
+
 def _set_prov_bbox_from_norm(item, norm_box: Tuple[float, float, float, float], pw: float, ph: float) -> None:
     """Replace a mapped element's geometry with a normalized 0..1 TOP-LEFT box (the matched OCR
     region's), converted to page coordinates — aligns a scanned-page element with the rendered page
@@ -1228,6 +1285,8 @@ def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
     # affiliation/email) so each author is ONE consistent node — split first, then re-join.
     _resegment_overflow_nodes(doc, source)
     _coalesce_text_blocks(doc, source)
+    # Attach detached table footnotes to their table (Docling leaves Table.footnotes empty).
+    _attach_table_footnotes(doc)
 
     # NATIVE (pre-OCR) digital-text density per page, captured on the original layout doc before any
     # grounded rebuild replaces `doc`. Drives both the digital-text fast path and the scanned-page
