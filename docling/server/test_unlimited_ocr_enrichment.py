@@ -779,6 +779,7 @@ def test_multicolumn_author_block_each_author_grounded_in_its_own_column():
     from unlimited_ocr_enrichment import (
         _coalesce_text_blocks,
         _attach_table_footnotes,
+    _recognize_structured_environments,
     _resegment_overflow_nodes,
         _structure_converter,
     )
@@ -866,3 +867,53 @@ def test_attach_table_footnotes_links_marked_note_below_table_only():
     assert n == 1
     refs = [r.cref for r in doc.tables[0].footnotes]
     assert refs == ["#/texts/0"]  # only the marked note directly below; prose + far note excluded
+
+
+def test_recognize_structured_environments_relabels_algorithm_and_box():
+    # An "Algorithm N …" / "Box N …" title Docling tags SECTION_HEADER is demoted to CAPTION (no more
+    # fake section / section_path pollution); an algorithm's pseudocode steps become CODE; ordinary
+    # prose after the algorithm and a box's bullet list are untouched.
+    from docling_core.types.doc import (
+        BoundingBox,
+        CoordOrigin,
+        DocItemLabel,
+        DoclingDocument,
+        ProvenanceItem,
+        Size,
+    )
+    from unlimited_ocr_enrichment import _recognize_structured_environments
+
+    doc = DoclingDocument(name="d")
+    doc.add_page(page_no=1, size=Size(width=595.0, height=842.0))
+
+    def prov():
+        return ProvenanceItem(
+            page_no=1,
+            bbox=BoundingBox(l=0, t=10, r=10, b=0, coord_origin=CoordOrigin.TOPLEFT),
+            charspan=(0, 1),
+        )
+
+    def add(label, text):
+        doc.add_text(label=label, text=text, orig=text, prov=prov())
+
+    add(DocItemLabel.SECTION_HEADER, "Algorithm 1 ISR gating with permutation mixture")
+    add(DocItemLabel.TEXT, "Require: Prompt x, target reliability h")
+    add(DocItemLabel.LIST_ITEM, "1: Sample permutations of evidence")
+    add(DocItemLabel.LIST_ITEM, "2: for k = 1 to m do")
+    add(DocItemLabel.LIST_ITEM, "15: end if")
+    add(DocItemLabel.TEXT, "ISR gate. If q = 0.10 the model answers.")  # prose — must stay text
+    add(DocItemLabel.SECTION_HEADER, "Box 1: Hallucination Prevention Metrics")
+    add(DocItemLabel.LIST_ITEM, "B2T(x) = KL(Ber(1-h))")  # a box bullet — stays list_item
+
+    n = _recognize_structured_environments(doc)
+    assert n >= 6
+    by = {(it.text or "")[:14]: it.label for it in doc.texts}
+    assert by["Algorithm 1 IS"] == DocItemLabel.CAPTION
+    assert by["Require: Promp"] == DocItemLabel.CODE
+    assert by["1: Sample perm"] == DocItemLabel.CODE
+    assert by["2: for k = 1 t"] == DocItemLabel.CODE
+    assert by["15: end if"] == DocItemLabel.CODE
+    assert by["ISR gate. If q"] == DocItemLabel.TEXT  # prose after the algorithm untouched
+    assert by["Box 1: Halluci"] == DocItemLabel.CAPTION
+    assert by["B2T(x) = KL(Be"] == DocItemLabel.LIST_ITEM  # box bullet unchanged
+    assert not any(it.label == DocItemLabel.SECTION_HEADER for it in doc.texts)

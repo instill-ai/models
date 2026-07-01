@@ -1138,6 +1138,59 @@ def _attach_table_footnotes(doc: DoclingDocument) -> int:
     return attached
 
 
+# CS papers frame ALGORITHM (LaTeX algorithm/algorithmic) and BOXED-CALLOUT (tcolorbox/mdframed)
+# environments as a titled block, but Docling's layout mislabels the "Algorithm N …" / "Box N …" title
+# as a SECTION_HEADER (which then pollutes every following chunk's section_path breadcrumb, like the
+# "list" leak) and scatters the numbered pseudocode as bare list_items. Recognize the environment and
+# relabel: the title → caption (no longer a fake section), the pseudocode steps → code. Gated.
+_STRUCTURED_ENV = (
+    os.environ.get("SHUBO_DOCLING_STRUCTURED_ENV", "1").strip().lower()
+    not in ("0", "false", "no", "off")
+)
+_ENV_CAPTION_RE = re.compile(r"^\s*(Algorithm|Procedure|Listing|Box|Sidebar|Panel)\s+\d+\b", re.IGNORECASE)
+_ALGO_CAPTION_RE = re.compile(r"^\s*(Algorithm|Procedure|Listing)\s+\d+\b", re.IGNORECASE)
+_ALGO_STEP_NUM_RE = re.compile(r"^\s*\d+\s*:")  # "1:", "15: end if"
+_ALGO_STEP_KW_RE = re.compile(r"^\s*(Require|Ensure|Input|Output)\s*:", re.IGNORECASE)
+
+
+def _recognize_structured_environments(doc: DoclingDocument) -> int:
+    """Relabel algorithm / boxed-callout environments Docling mislabels. An "Algorithm N …" / "Box N …"
+    title that Docling tagged SECTION_HEADER is demoted to CAPTION (so it stops acting as a document
+    section + polluting section_path); for an ALGORITHM, the contiguous pseudocode steps that follow
+    (numbered list_items, or Require:/Ensure:/Input:/Output: text) are relabelled CODE. Strictly scoped
+    by the title regex + a contiguous, pattern-matched step run; ordinary prose is never touched.
+    Returns the number of nodes relabelled. Gated by `_STRUCTURED_ENV`."""
+    if not _STRUCTURED_ENV:
+        return 0
+    from docling_core.types.doc import DocItemLabel
+
+    texts = list(doc.texts)
+    n = len(texts)
+    changed = 0
+    for i, it in enumerate(texts):
+        if it.label != DocItemLabel.SECTION_HEADER:
+            continue
+        s = it.text or ""
+        if not _ENV_CAPTION_RE.match(s):
+            continue
+        it.label = DocItemLabel.CAPTION  # a fake section header → the environment's caption
+        changed += 1
+        if not _ALGO_CAPTION_RE.match(s):
+            continue  # a Box/callout title needs no step relabelling (its body is a normal list)
+        # Relabel the CONTIGUOUS pseudocode steps that follow (in reading order) → code.
+        for j in range(i + 1, n):
+            nt = texts[j]
+            ns = nt.text or ""
+            is_step = (
+                nt.label == DocItemLabel.LIST_ITEM and bool(_ALGO_STEP_NUM_RE.match(ns))
+            ) or (nt.label == DocItemLabel.TEXT and bool(_ALGO_STEP_KW_RE.match(ns)))
+            if not is_step:
+                break  # first non-step ends the algorithm body
+            nt.label = DocItemLabel.CODE
+            changed += 1
+    return changed
+
+
 def _set_prov_bbox_from_norm(item, norm_box: Tuple[float, float, float, float], pw: float, ph: float) -> None:
     """Replace a mapped element's geometry with a normalized 0..1 TOP-LEFT box (the matched OCR
     region's), converted to page coordinates — aligns a scanned-page element with the rendered page
@@ -1287,6 +1340,8 @@ def convert_to_contract(source: Union[str, bytes], ocr_raw: OcrRaw) -> dict:
     _coalesce_text_blocks(doc, source)
     # Attach detached table footnotes to their table (Docling leaves Table.footnotes empty).
     _attach_table_footnotes(doc)
+    # Recognize algorithm / boxed-callout environments Docling mislabels as section_header + list_items.
+    _recognize_structured_environments(doc)
 
     # NATIVE (pre-OCR) digital-text density per page, captured on the original layout doc before any
     # grounded rebuild replaces `doc`. Drives both the digital-text fast path and the scanned-page
